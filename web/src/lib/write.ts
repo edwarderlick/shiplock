@@ -141,8 +141,9 @@ export async function writeIc({
   } catch (e: any) {
     try {
       tx = await client.getTransaction({ hash: txId });
-      const status = tx?.statusName || tx?.status;
-      const exec = tx?.txExecutionResultName || tx?.executionResultName || tx?.result || tx?.execution_result;
+      const txAny = tx as any;
+      const status = txAny?.statusName || txAny?.status;
+      const exec = txAny?.txExecutionResultName || txAny?.executionResultName || txAny?.result || txAny?.execution_result;
       if (!tx || (status !== 'ACCEPTED' && status !== 'FINALIZED' && status !== 5 && status !== 7) || !String(exec).includes("FINISHED_WITH_RETURN")) {
         throw e;
       }
