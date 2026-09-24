@@ -1,0 +1,866 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head><meta charset="utf-8"/><meta content="width=device-width, initial-scale=1.0" name="viewport"/><meta content="web_standard" name="shell-type"/><link href="https://fonts.googleapis.com" rel="preconnect"/><link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/><link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&amp;family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&amp;family=Space+Grotesk:wght@400;500;600&amp;display=swap" rel="stylesheet"/><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/><style>@layer base{html,body{margin:0;padding:0;}body{overscroll-behavior:none;}main>:first-child{margin-top:0!important;}main>:last-child{margin-bottom:0!important;}}::-webkit-scrollbar{display:none;}</style><script src="https://cdn.tailwindcss.com"></script><script id="tailwind-config">tailwind.config = {
+    darkMode: "class",
+    theme: {
+      extend: {
+        "colors": {
+          "secondary-fixed-dim": "#c6c6c7",
+          "on-error-container": "#ffdad6",
+          "outline-variant": "#464835",
+          "on-primary-container": "#5e6b00",
+          "on-primary-fixed": "#191e00",
+          "on-surface-variant": "#c7c8af",
+          "background": "#131313",
+          "inverse-on-surface": "#313030",
+          "on-tertiary-fixed": "#1a1b1f",
+          "surface-tint": "#bcd12b",
+          "surface-container-highest": "#353534",
+          "on-primary-fixed-variant": "#424b00",
+          "surface-container-high": "#2a2a2a",
+          "on-surface": "#e5e2e1",
+          "on-error": "#690005",
+          "on-background": "#e5e2e1",
+          "on-primary": "#2d3400",
+          "on-secondary-fixed-variant": "#454747",
+          "tertiary-fixed": "#e3e2e7",
+          "on-tertiary-fixed-variant": "#46464b",
+          "surface-container-low": "#1c1b1b",
+          "on-secondary-fixed": "#1a1c1c",
+          "secondary": "#c6c6c7",
+          "secondary-fixed": "#e2e2e2",
+          "secondary-container": "#454747",
+          "on-secondary-container": "#b4b5b5",
+          "surface-container-lowest": "#0e0e0e",
+          "surface-bright": "#3a3939",
+          "inverse-primary": "#586400",
+          "surface-container": "#201f1f",
+          "primary-container": "#d8ee48",
+          "error-container": "#93000a",
+          "inverse-surface": "#e5e2e1",
+          "primary-fixed": "#d8ee48",
+          "primary": "#ffffff",
+          "tertiary-fixed-dim": "#c6c6cb",
+          "outline": "#91927b",
+          "on-secondary": "#2f3131",
+          "tertiary": "#ffffff",
+          "error": "#ffb4ab",
+          "surface-dim": "#131313",
+          "on-tertiary": "#2f3034",
+          "tertiary-container": "#e3e2e7",
+          "surface-variant": "#353534",
+          "primary-fixed-dim": "#bcd12b",
+          "on-tertiary-container": "#636469",
+          "surface": "#131313"
+        },
+        "borderRadius": {
+          "DEFAULT": "0.25rem",
+          "lg": "0.5rem",
+          "xl": "0.75rem",
+          "full": "9999px"
+        },
+        "spacing": {
+          "space-sm": "0.5rem",
+          "space-md": "1rem",
+          "space-lg": "1.5rem",
+          "space-xl": "2.5rem",
+          "space-xs": "0.25rem",
+          "margin-sm": "1.25rem",
+          "margin": "2.5rem",
+          "gutter": "1.5rem",
+          "gutter-sm": "1rem"
+        },
+        "fontFamily": {
+          "display-lg": [
+            "Newsreader"
+          ],
+          "headline-lg": [
+            "Newsreader"
+          ],
+          "body-lg": [
+            "Space Grotesk"
+          ],
+          "display-xl-mobile": [
+            "Newsreader"
+          ],
+          "body-md": [
+            "Space Grotesk"
+          ],
+          "headline-sm": [
+            "Space Grotesk"
+          ],
+          "display-xl": [
+            "Newsreader"
+          ],
+          "mono-data-sm": [
+            "JetBrains Mono"
+          ],
+          "display-lg-mobile": [
+            "Newsreader"
+          ],
+          "mono-label-xs": [
+            "JetBrains Mono"
+          ],
+          "headline-lg-mobile": [
+            "Newsreader"
+          ],
+          "headline-md": [
+            "Newsreader"
+          ],
+          "mono-metric-md": [
+            "JetBrains Mono"
+          ],
+          "mono-metric-lg": [
+            "JetBrains Mono"
+          ]
+        },
+        "fontSize": {
+          "display-lg": [
+            "56px",
+            {
+              "lineHeight": "60px",
+              "letterSpacing": "-0.025em",
+              "fontWeight": "400"
+            }
+          ],
+          "headline-lg": [
+            "40px",
+            {
+              "lineHeight": "46px",
+              "letterSpacing": "-0.02em",
+              "fontWeight": "400"
+            }
+          ],
+          "body-lg": [
+            "16px",
+            {
+              "lineHeight": "24px",
+              "letterSpacing": "0em",
+              "fontWeight": "400"
+            }
+          ],
+          "display-xl-mobile": [
+            "40px",
+            {
+              "lineHeight": "44px",
+              "letterSpacing": "-0.02em",
+              "fontWeight": "400"
+            }
+          ],
+          "body-md": [
+            "14px",
+            {
+              "lineHeight": "20px",
+              "letterSpacing": "0em",
+              "fontWeight": "400"
+            }
+          ],
+          "headline-sm": [
+            "20px",
+            {
+              "lineHeight": "26px",
+              "letterSpacing": "-0.01em",
+              "fontWeight": "600"
+            }
+          ],
+          "display-xl": [
+            "72px",
+            {
+              "lineHeight": "76px",
+              "letterSpacing": "-0.03em",
+              "fontWeight": "400"
+            }
+          ],
+          "mono-data-sm": [
+            "12px",
+            {
+              "lineHeight": "16px",
+              "letterSpacing": "0.02em",
+              "fontWeight": "400"
+            }
+          ],
+          "display-lg-mobile": [
+            "32px",
+            {
+              "lineHeight": "36px",
+              "letterSpacing": "-0.02em",
+              "fontWeight": "400"
+            }
+          ],
+          "mono-label-xs": [
+            "10px",
+            {
+              "lineHeight": "14px",
+              "letterSpacing": "0.08em",
+              "fontWeight": "600"
+            }
+          ],
+          "headline-lg-mobile": [
+            "26px",
+            {
+              "lineHeight": "32px",
+              "letterSpacing": "-0.01em",
+              "fontWeight": "400"
+            }
+          ],
+          "headline-md": [
+            "28px",
+            {
+              "lineHeight": "34px",
+              "letterSpacing": "-0.015em",
+              "fontWeight": "400"
+            }
+          ],
+          "mono-metric-md": [
+            "22px",
+            {
+              "lineHeight": "26px",
+              "letterSpacing": "-0.01em",
+              "fontWeight": "500"
+            }
+          ],
+          "mono-metric-lg": [
+            "36px",
+            {
+              "lineHeight": "40px",
+              "letterSpacing": "-0.02em",
+              "fontWeight": "500"
+            }
+          ]
+        }
+      },
+    },
+  }</script></head><body class="bg-surface font-body-md text-on-surface antialiased"><header class="fixed top-0 left-0 right-0 z-50 bg-surface/90 backdrop-blur-md shadow-[0_1px_8px_rgba(0,0,0,0.4)]"><div class="w-full px-margin-sm md:px-margin flex flex-col"><div class="hidden w-full py-space-xs px-space-sm bg-error-container text-on-error-container font-mono-label-xs text-mono-label-xs tracking-wider uppercase flex items-center justify-between" id="network-alert"><div class="flex items-center gap-space-sm"><span class="material-symbols-outlined text-[14px]">warning</span><span>UNSUPPORTED NETWORK DETECTED. REQUIRED CHAIN: GENLAYER STUDIO NEXT (CHAIN ID 61997)</span></div><button class="px-space-sm py-0.5 bg-error text-on-error font-mono-label-xs uppercase hover:bg-surface-bright">SWITCH NETWORK</button></div><div class="h-16 w-full flex items-center justify-between gap-space-md"><div class="flex items-center gap-space-lg"><div class="flex items-center gap-space-sm"><img alt="ShipLock Logo" class="h-8 w-auto object-contain" src="https://lh3.googleusercontent.com/aida/AEtjO1Uz4Oh0uKYntI40YhObI9NL9zEPqYitbCQ8-BHAmm-WQRXKvuGRz_oD4Uhh7B5oy2SSYFxoIYJg9yBNjhbfjd6VoLcx6B4Sr1KrgNFqBTYrFn7Dp3WYS0V4izfCEUcAP5Rh9DaPqmeNsPCYhewro66N7p6aBI27Zi4tAU3_OK4LtmRF8DThVWSNd8y8I99AnAkovPdizOeEy6wuwTAsPSiE0QCb-N4yXNLvQHW5iXzWQbbR_CA-lkkVl1VX"/><div class="flex flex-col"><span class="font-headline-sm text-headline-sm uppercase tracking-tight text-primary leading-none">ShipLock</span><span class="font-mono-label-xs text-mono-label-xs text-on-surface-variant uppercase tracking-widest">REGISTRY // ESCROW</span></div></div><div class="hidden xl:flex items-center gap-space-xs font-mono-label-xs text-mono-label-xs text-on-surface-variant px-space-sm py-1 bg-surface-container-low"><span class="text-primary-fixed">[SYS: CAD_v2.4]</span><span class="text-outline">//</span><span class="text-secondary">0x4B:DEPLOYED</span></div></div><nav class="hidden lg:flex items-center gap-space-xs font-body-md text-body-md" data-active-classes="bg-primary-container text-on-primary-container font-bold"><a aria-current="page" class="px-space-md py-space-xs transition-colors uppercase bg-primary-container text-on-primary-container font-bold" data-path="lock-escrow" href="#">Lock Escrow</a><a class="px-space-md py-space-xs text-on-surface-variant hover:text-on-surface transition-colors uppercase font-medium" data-path="browse" href="#">Browse</a><a class="px-space-md py-space-xs text-on-surface-variant hover:text-on-surface transition-colors uppercase font-medium" data-path="my-locks" href="#">My Locks</a><a class="px-space-md py-space-xs text-on-surface-variant hover:text-on-surface transition-colors uppercase font-medium" data-path="economics" href="#">Economics</a><a class="px-space-md py-space-xs text-on-surface-variant hover:text-on-surface transition-colors uppercase font-medium" data-path="how-it-works" href="#">How it works</a></nav><div class="flex items-center gap-space-sm sm:gap-space-md"><div class="hidden sm:flex items-center gap-space-sm px-space-sm py-1.5 bg-surface-container-low font-mono-data-sm text-mono-data-sm"><span class="relative flex h-2 w-2"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary-fixed opacity-75"></span><span class="relative inline-flex rounded-full h-2 w-2 bg-primary-fixed"></span></span><span class="text-on-surface">Studio Next (61997)</span><span class="font-mono-label-xs text-mono-label-xs text-outline">42ms</span></div><div class="flex items-center gap-space-sm px-space-md py-1.5 bg-surface-container font-mono-data-sm text-mono-data-sm"><span class="text-primary-fixed font-medium">420.50 GEN</span><span class="text-outline">|</span><span class="text-on-surface tracking-wider">0x71C...3A9f</span></div><div class="w-8 h-8 rounded-full bg-primary flex items-center justify-center"><span class="material-symbols-outlined text-on-primary text-[18px]">person</span></div></div></div></div></header><main class="w-full pt-16 bg-surface"><div class="flex flex-col w-full">
+<!-- INDUSTRIAL OPERATIONAL STATUS BAR -->
+<section class="w-full bg-surface-container-lowest px-margin-sm md:px-margin py-space-sm">
+<div class="w-full flex flex-col lg:flex-row items-start lg:items-center justify-between gap-space-sm font-mono-data-sm text-mono-data-sm">
+<div class="flex flex-wrap items-center gap-space-md">
+<div class="flex items-center gap-space-xs text-primary-fixed font-semibold tracking-wider uppercase">
+<span class="inline-block w-2 h-2 rounded-full bg-primary-fixed animate-pulse"></span>
+<span>SYSTEM ACTIVE</span>
+</div>
+<span class="text-outline hidden sm:inline">|</span>
+<div class="text-on-surface-variant flex items-center gap-1.5">
+<span class="text-outline">ENV:</span>
+<span class="text-on-surface">GenLayer Studio Next</span>
+<span class="px-1.5 py-0.5 bg-surface-container text-[10px] font-mono-label-xs text-primary-fixed">CHAIN ID 61997</span>
+</div>
+<span class="text-outline hidden sm:inline">|</span>
+<div class="text-on-surface-variant flex items-center gap-1.5">
+<span class="text-outline">RPC:</span>
+<span class="text-on-surface font-mono-data-sm">studio-dev.genlayer.com</span>
+</div>
+</div>
+<div class="flex items-center gap-space-md w-full lg:w-auto justify-between lg:justify-end">
+<div class="flex items-center gap-space-xs font-mono-label-xs text-mono-label-xs text-on-surface-variant">
+<span class="text-primary-fixed">[GAS: 0.00018 GEN]</span>
+<span class="text-outline">//</span>
+<span>QUORUM: 5/5 ONLINE</span>
+</div>
+<div class="px-2 py-0.5 bg-surface-container-high text-primary-fixed text-mono-label-xs font-mono-label-xs uppercase">
+          DISINTERMEDIATED ESCROW
+        </div>
+</div>
+</div>
+</section>
+<!-- HERO EDITORIAL & STEP CONTROLLER HEADER -->
+<section class="w-full bg-surface px-margin-sm md:px-margin py-space-xl">
+<div class="w-full flex flex-col gap-space-lg">
+<div class="flex flex-col lg:flex-row items-start lg:items-end justify-between gap-space-md">
+<div class="flex flex-col max-w-3xl gap-space-xs">
+<div class="flex items-center gap-space-sm font-mono-label-xs text-mono-label-xs tracking-widest text-primary-fixed uppercase">
+<span>[PROTOCOL // CAD_REGISTRY_LOCK]</span>
+<span class="text-outline">/</span>
+<span>SPEC v2.4.9</span>
+</div>
+<h1 class="font-headline-lg text-headline-lg text-primary tracking-tight">
+            Programmatic lock escrow choreographed to package release.
+          </h1>
+<p class="font-body-md text-body-md text-on-surface-variant max-w-2xl">
+            Autonomous settlement conditioned on tamper-proof PyPI and npm indexer publications. Funds lock deterministically in GenLayer intelligent contracts until the target semantic version releases.
+          </p>
+</div>
+<div class="flex flex-col items-start lg:items-end gap-1 font-mono-data-sm text-mono-data-sm">
+<span class="text-on-surface-variant">FUNDING WALLET</span>
+<span class="text-primary-fixed bg-surface-container-low px-space-md py-1 font-medium">0x71C...3A9f (CONNECTED)</span>
+<span class="text-outline font-mono-label-xs text-mono-label-xs">BALANCE: 420.50 TEST GEN</span>
+</div>
+</div>
+<!-- 6-STEP PIPELINE TRACKER -->
+<div class="w-full bg-surface-container-lowest p-space-sm">
+<div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
+<!-- Step 1 (Completed) -->
+<div class="flex flex-col p-space-sm bg-surface-container-low transition-colors group cursor-pointer" onclick="setActiveStep(1)">
+<div class="flex items-center justify-between font-mono-label-xs text-mono-label-xs mb-1">
+<span class="text-primary-fixed font-bold">01</span>
+<span class="material-symbols-outlined text-primary-fixed text-[14px]">check_circle</span>
+</div>
+<span class="font-headline-sm text-[13px] uppercase tracking-tight text-primary">Template</span>
+<span class="font-mono-label-xs text-mono-label-xs text-primary-fixed truncate mt-0.5">PYPI_VERSION</span>
+</div>
+<!-- Step 2 (Completed) -->
+<div class="flex flex-col p-space-sm bg-surface-container-low transition-colors group cursor-pointer" onclick="setActiveStep(2)">
+<div class="flex items-center justify-between font-mono-label-xs text-mono-label-xs mb-1">
+<span class="text-primary-fixed font-bold">02</span>
+<span class="material-symbols-outlined text-primary-fixed text-[14px]">check_circle</span>
+</div>
+<span class="font-headline-sm text-[13px] uppercase tracking-tight text-primary">Package</span>
+<span class="font-mono-label-xs text-mono-label-xs text-on-surface-variant truncate mt-0.5">fastapi-auth-guards:0.4.2</span>
+</div>
+<!-- Step 3 (Completed) -->
+<div class="flex flex-col p-space-sm bg-surface-container-low transition-colors group cursor-pointer" onclick="setActiveStep(3)">
+<div class="flex items-center justify-between font-mono-label-xs text-mono-label-xs mb-1">
+<span class="text-primary-fixed font-bold">03</span>
+<span class="material-symbols-outlined text-primary-fixed text-[14px]">check_circle</span>
+</div>
+<span class="font-headline-sm text-[13px] uppercase tracking-tight text-primary">Recipient</span>
+<span class="font-mono-label-xs text-mono-label-xs text-on-surface-variant truncate mt-0.5">0x94B7...e21C</span>
+</div>
+<!-- Step 4 (Completed) -->
+<div class="flex flex-col p-space-sm bg-surface-container-low transition-colors group cursor-pointer" onclick="setActiveStep(4)">
+<div class="flex items-center justify-between font-mono-label-xs text-mono-label-xs mb-1">
+<span class="text-primary-fixed font-bold">04</span>
+<span class="material-symbols-outlined text-primary-fixed text-[14px]">check_circle</span>
+</div>
+<span class="font-headline-sm text-[13px] uppercase tracking-tight text-primary">Window</span>
+<span class="font-mono-label-xs text-mono-label-xs text-on-surface-variant truncate mt-0.5">7D (May 10 - 17)</span>
+</div>
+<!-- Step 5 (Completed) -->
+<div class="flex flex-col p-space-sm bg-surface-container-low transition-colors group cursor-pointer" onclick="setActiveStep(5)">
+<div class="flex items-center justify-between font-mono-label-xs text-mono-label-xs mb-1">
+<span class="text-primary-fixed font-bold">05</span>
+<span class="material-symbols-outlined text-primary-fixed text-[14px]">check_circle</span>
+</div>
+<span class="font-headline-sm text-[13px] uppercase tracking-tight text-primary">Amount</span>
+<span class="font-mono-label-xs text-mono-label-xs text-on-surface-variant truncate mt-0.5">500.00 GEN</span>
+</div>
+<!-- Step 6 (ACTIVE CURRENT) -->
+<div class="flex flex-col p-space-sm bg-primary-container text-on-primary-container shadow-md" onclick="setActiveStep(6)">
+<div class="flex items-center justify-between font-mono-label-xs text-mono-label-xs mb-1">
+<span class="font-black text-on-primary-container">06</span>
+<span class="px-1 bg-surface-dim text-primary-fixed text-[9px] font-bold uppercase">FINAL</span>
+</div>
+<span class="font-headline-sm text-[13px] uppercase tracking-tight font-bold text-on-primary-container">Review &amp; Lock</span>
+<span class="font-mono-label-xs text-mono-label-xs text-on-primary font-semibold truncate mt-0.5">READY FOR TX</span>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- DUAL-CHAMBER INDUSTRIAL WORKSPACE (WIZARD + TELEMETRY INSPECTOR) -->
+<section class="w-full bg-surface-dim px-margin-sm md:px-margin pb-space-xl">
+<div class="grid grid-cols-1 lg:grid-cols-12 gap-space-lg items-start">
+<!-- LEFT PRIMARY WIZARD FORM COLUMN (7 COLS) -->
+<div class="lg:col-span-7 flex flex-col gap-space-lg">
+<!-- STEP 01: TEMPLATE SELECTION -->
+<div class="bg-surface-container-low p-space-lg flex flex-col gap-space-md relative overflow-hidden">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-space-sm">
+<span class="px-2 py-0.5 bg-surface-container text-primary-fixed font-mono-label-xs text-mono-label-xs uppercase tracking-wider font-bold">STAGE 01</span>
+<h2 class="font-headline-md text-headline-md text-primary">Template Protocol</h2>
+</div>
+<span class="font-mono-label-xs text-mono-label-xs text-on-surface-variant">[CAD_ROUTE: ORACLE_REGISTRY]</span>
+</div>
+<p class="font-body-md text-body-md text-on-surface-variant">
+            Selects the verified immutable upstream index feed. Does not permit party-supplied payout multiples or subjective human arbiters.
+          </p>
+<div class="grid grid-cols-1 sm:grid-cols-2 gap-space-md">
+<!-- PYPI ACTIVE CHIP -->
+<button class="flex flex-col items-start p-space-md bg-surface-container text-left transition-all relative" id="tpl-pypi" onclick="selectTemplate('PYPI')">
+<div class="flex items-center justify-between w-full mb-space-xs">
+<div class="flex items-center gap-space-xs font-mono-label-xs text-mono-label-xs text-primary-fixed font-bold tracking-wider">
+<span class="material-symbols-outlined text-[16px]">terminal</span>
+<span>PYPI_VERSION</span>
+</div>
+<span class="w-2 h-2 rounded-full bg-primary-fixed"></span>
+</div>
+<span class="font-headline-sm text-headline-sm text-primary">Python Package Index</span>
+<span class="font-mono-data-sm text-mono-data-sm text-on-surface-variant mt-1">Official JSON API feed via pypi.org/pypi/{pkg}/{ver}/json</span>
+<div class="mt-space-md w-full flex items-center justify-between pt-space-xs bg-surface-container-lowest px-2 py-1">
+<span class="font-mono-label-xs text-mono-label-xs text-on-surface-variant">LEADERLESS QUORUM</span>
+<span class="font-mono-label-xs text-mono-label-xs text-primary-fixed">5/5 VERIFIERS</span>
+</div>
+</button>
+<!-- NPM PASSIVE CHIP -->
+<button class="flex flex-col items-start p-space-md bg-surface-container-lowest hover:bg-surface-container transition-all text-left group" id="tpl-npm" onclick="selectTemplate('NPM')">
+<div class="flex items-center justify-between w-full mb-space-xs">
+<div class="flex items-center gap-space-xs font-mono-label-xs text-mono-label-xs text-on-surface-variant font-bold tracking-wider">
+<span class="material-symbols-outlined text-[16px]">code</span>
+<span>NPM_VERSION</span>
+</div>
+<span class="w-2 h-2 rounded-full bg-surface-container-highest"></span>
+</div>
+<span class="font-headline-sm text-headline-sm text-secondary">Node Package Manager</span>
+<span class="font-mono-data-sm text-mono-data-sm text-on-surface-variant mt-1">registry.npmjs.org direct tarball/manifest notarization</span>
+<div class="mt-space-md w-full flex items-center justify-between pt-space-xs bg-surface-container px-2 py-1">
+<span class="font-mono-label-xs text-mono-label-xs text-on-surface-variant">LEADERLESS QUORUM</span>
+<span class="font-mono-label-xs text-mono-label-xs text-secondary">STANDBY</span>
+</div>
+</button>
+</div>
+</div>
+<!-- STEP 02: PACKAGE & VERSION SPECIFICATION -->
+<div class="bg-surface-container-low p-space-lg flex flex-col gap-space-md">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-space-sm">
+<span class="px-2 py-0.5 bg-surface-container text-primary-fixed font-mono-label-xs text-mono-label-xs uppercase tracking-wider font-bold">STAGE 02</span>
+<h2 class="font-headline-md text-headline-md text-primary">Artifact Coordinates</h2>
+</div>
+<span class="font-mono-label-xs text-mono-label-xs text-primary-fixed flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">verified</span>
+<span>SYNTAX STRICT</span>
+</span>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-12 gap-space-md">
+<!-- PACKAGE NAME INPUT -->
+<div class="md:col-span-7 flex flex-col gap-1">
+<label class="font-mono-label-xs text-mono-label-xs uppercase text-on-surface-variant tracking-wider flex justify-between">
+<span>TARGET PACKAGE IDENTIFIER</span>
+<span class="text-primary-fixed font-medium">CANONICAL PYPI SLUG</span>
+</label>
+<div class="relative flex items-center bg-surface-container-lowest">
+<span class="material-symbols-outlined text-outline text-[18px] ml-space-md">inventory_2</span>
+<input class="w-full bg-transparent px-space-md py-space-sm text-primary font-mono-data-sm text-mono-data-sm focus:outline-none focus:text-primary-fixed" id="input-pkg" oninput="updateFeedPreview()" placeholder="e.g. fastapi-auth-guards" type="text" value="fastapi-auth-guards"/>
+<span class="material-symbols-outlined text-primary-fixed text-[18px] mr-space-md">check_circle</span>
+</div>
+<div class="flex items-center gap-1 font-mono-label-xs text-mono-label-xs text-primary-fixed mt-0.5">
+<span class="material-symbols-outlined text-[12px]">done</span>
+<span>Valid registry syntax. Lowercase ASCII and hyphens only.</span>
+</div>
+</div>
+<!-- EXACT VERSION INPUT -->
+<div class="md:col-span-5 flex flex-col gap-1">
+<label class="font-mono-label-xs text-mono-label-xs uppercase text-on-surface-variant tracking-wider flex justify-between">
+<span>SEMANTIC VERSION</span>
+<span class="text-outline">SEMVER STRICT</span>
+</label>
+<div class="relative flex items-center bg-surface-container-lowest">
+<span class="material-symbols-outlined text-outline text-[18px] ml-space-md">tag</span>
+<input class="w-full bg-transparent px-space-md py-space-sm text-primary font-mono-data-sm text-mono-data-sm focus:outline-none focus:text-primary-fixed" id="input-ver" oninput="updateFeedPreview()" placeholder="e.g. 0.4.2" type="text" value="0.4.2"/>
+<span class="material-symbols-outlined text-primary-fixed text-[18px] mr-space-md">check_circle</span>
+</div>
+<div class="flex items-center gap-1 font-mono-label-xs text-mono-label-xs text-on-surface-variant mt-0.5">
+<span class="text-error font-bold tracking-wider">!</span>
+<span>Exact semver required. "latest" or "v" prefix rejected.</span>
+</div>
+</div>
+</div>
+<!-- LIVE CONSTRUCTED ORACLE FEED PREVIEW -->
+<div class="bg-surface-container p-space-md flex flex-col gap-space-xs">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-space-xs">
+<span class="px-1.5 py-0.5 bg-primary-container text-on-primary-container font-mono-label-xs text-mono-label-xs font-bold uppercase">
+                  OFFICIAL REGISTRY FEED
+                </span>
+<span class="font-mono-label-xs text-mono-label-xs text-on-surface-variant">AUTONOMOUS ORACLE RESOLVER</span>
+</div>
+<span class="font-mono-label-xs text-mono-label-xs text-primary-fixed">HTTP 404 (FUTURE PUBLICATION)</span>
+</div>
+<div class="bg-surface-container-lowest p-space-sm font-mono-data-sm text-mono-data-sm text-primary-fixed break-all select-all flex items-center justify-between gap-space-sm">
+<span id="feed-preview-url">https://pypi.org/pypi/fastapi-auth-guards/0.4.2/json</span>
+<button class="px-2 py-1 bg-surface-container text-on-surface hover:text-primary-fixed text-[11px] uppercase font-mono-label-xs flex items-center gap-1" onclick="navigator.clipboard.writeText(document.getElementById('feed-preview-url').innerText)">
+<span class="material-symbols-outlined text-[13px]">content_copy</span>
+<span>COPY</span>
+</button>
+</div>
+<p class="font-mono-label-xs text-mono-label-xs text-on-surface-variant">
+              GenLayer consensus nodes will execute leaderless HTTP GET queries against this endpoint throughout the active verification epoch.
+            </p>
+</div>
+</div>
+<!-- STEP 03: RECIPIENT SETTLEMENT ADDRESS -->
+<div class="bg-surface-container-low p-space-lg flex flex-col gap-space-md">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-space-sm">
+<span class="px-2 py-0.5 bg-surface-container text-primary-fixed font-mono-label-xs text-mono-label-xs uppercase tracking-wider font-bold">STAGE 03</span>
+<h2 class="font-headline-md text-headline-md text-primary">Beneficiary Vault</h2>
+</div>
+<span class="font-mono-label-xs text-mono-label-xs text-on-surface-variant">[PAYEE ASSIGNMENT]</span>
+</div>
+<div class="flex flex-col gap-1">
+<label class="font-mono-label-xs text-mono-label-xs uppercase text-on-surface-variant tracking-wider flex justify-between">
+<span>RECIPIENT EVM WALLET ADDRESS</span>
+<span class="text-primary-fixed font-medium">UNIQUE ACTOR CHECK PASSED</span>
+</label>
+<div class="relative flex items-center bg-surface-container-lowest">
+<span class="material-symbols-outlined text-outline text-[18px] ml-space-md">account_balance_wallet</span>
+<input class="w-full bg-transparent px-space-md py-space-sm text-primary font-mono-data-sm text-mono-data-sm focus:outline-none focus:text-primary-fixed" type="text" value="0x94B7f8841a05299D3B5C40f5B5CeeC452414e21C"/>
+<span class="material-symbols-outlined text-primary-fixed text-[18px] mr-space-md">format_image_left</span>
+</div>
+<div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-1 text-mono-data-sm font-mono-data-sm mt-1 bg-surface-container px-space-sm py-1">
+<span class="text-on-surface-variant">Validator Rule: <span class="text-on-surface">Recipient != Funder (0x71C...3A9f)</span></span>
+<span class="text-primary-fixed font-semibold tracking-wider">VERIFIED UNIQUE BENEFICIARY</span>
+</div>
+</div>
+</div>
+<!-- STEP 04: UTC TEMPORAL WINDOW -->
+<div class="bg-surface-container-low p-space-lg flex flex-col gap-space-md">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-space-sm">
+<span class="px-2 py-0.5 bg-surface-container text-primary-fixed font-mono-label-xs text-mono-label-xs uppercase tracking-wider font-bold">STAGE 04</span>
+<h2 class="font-headline-md text-headline-md text-primary">Temporal Execution Window</h2>
+</div>
+<span class="font-mono-label-xs text-mono-label-xs text-primary-fixed">[DELTA: EXACTLY 7 DAYS]</span>
+</div>
+<div class="grid grid-cols-1 sm:grid-cols-2 gap-space-md">
+<div class="flex flex-col gap-1">
+<span class="font-mono-label-xs text-mono-label-xs uppercase text-on-surface-variant tracking-wider">WINDOW START (UTC)</span>
+<div class="bg-surface-container-lowest p-space-sm flex items-center justify-between">
+<span class="font-mono-data-sm text-mono-data-sm text-primary font-medium">2025-05-10 12:00:00 UTC</span>
+<span class="material-symbols-outlined text-on-surface-variant text-[16px]">schedule</span>
+</div>
+<span class="font-mono-label-xs text-mono-label-xs text-on-surface-variant mt-0.5">Evaluation gate unlocks at this timestamp</span>
+</div>
+<div class="flex flex-col gap-1">
+<span class="font-mono-label-xs text-mono-label-xs uppercase text-on-surface-variant tracking-wider">WINDOW CLOSE (UTC)</span>
+<div class="bg-surface-container-lowest p-space-sm flex items-center justify-between">
+<span class="font-mono-data-sm text-mono-data-sm text-primary font-medium">2025-05-17 12:00:00 UTC</span>
+<span class="material-symbols-outlined text-on-surface-variant text-[16px]">event_busy</span>
+</div>
+<span class="font-mono-label-xs text-mono-label-xs text-on-surface-variant mt-0.5">SLA deadline; no releases accepted after</span>
+</div>
+</div>
+<!-- UNDERWRITING CAD VERIFICATION BOX -->
+<div class="bg-surface-container p-space-md flex flex-col gap-space-sm">
+<div class="flex items-center justify-between">
+<span class="font-mono-label-xs text-mono-label-xs uppercase tracking-wider text-primary-fixed font-bold">
+                SYSTEM UNDERWRITING &amp; SAFETY AUDIT
+              </span>
+<span class="px-1.5 py-0.5 bg-surface-container-highest text-primary font-mono-label-xs text-mono-label-xs">4/4 PARAMETERS SATISFIED</span>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-space-sm font-mono-data-sm text-mono-data-sm">
+<div class="flex items-start gap-space-xs text-on-surface-variant bg-surface-container-lowest p-space-xs">
+<span class="material-symbols-outlined text-primary-fixed text-[16px] mt-0.5">task_alt</span>
+<div>
+<div class="text-on-surface font-medium">Fundable Until:</div>
+<div class="text-primary-fixed">2025-05-09 12:00:00 UTC</div>
+<div class="text-[10px] text-outline">(&gt;= 24h lead-time gate passed)</div>
+</div>
+</div>
+<div class="flex items-start gap-space-xs text-on-surface-variant bg-surface-container-lowest p-space-xs">
+<span class="material-symbols-outlined text-primary-fixed text-[16px] mt-0.5">task_alt</span>
+<div>
+<div class="text-on-surface font-medium">FUTURE_SHIP Status:</div>
+<div class="text-primary-fixed">Registry confirms 404</div>
+<div class="text-[10px] text-outline">Target version does not exist on PyPI</div>
+</div>
+</div>
+<div class="flex items-start gap-space-xs text-on-surface-variant bg-surface-container-lowest p-space-xs">
+<span class="material-symbols-outlined text-primary-fixed text-[16px] mt-0.5">task_alt</span>
+<div>
+<div class="text-on-surface font-medium">Release Evaluation Window:</div>
+<div class="text-primary-fixed">May 10 to May 17, 2025</div>
+<div class="text-[10px] text-outline">Span: 168 hours (Limit: 24h - 336h)</div>
+</div>
+</div>
+<div class="flex items-start gap-space-xs text-on-surface-variant bg-surface-container-lowest p-space-xs">
+<span class="material-symbols-outlined text-primary-fixed text-[16px] mt-0.5">task_alt</span>
+<div>
+<div class="text-on-surface font-medium">Auto-Refund Grace Period:</div>
+<div class="text-primary-fixed">2025-05-24 12:00:00 UTC</div>
+<div class="text-[10px] text-outline">+7 days past close if un-dispatched</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- STEP 05: ESCROW PRINCIPAL AMOUNT -->
+<div class="bg-surface-container-low p-space-lg flex flex-col gap-space-md">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-space-sm">
+<span class="px-2 py-0.5 bg-surface-container text-primary-fixed font-mono-label-xs text-mono-label-xs uppercase tracking-wider font-bold">STAGE 05</span>
+<h2 class="font-headline-md text-headline-md text-primary">Escrow Liquidity</h2>
+</div>
+<span class="font-mono-label-xs text-mono-label-xs text-on-surface-variant">[TOKEN: GEN NATIVE]</span>
+</div>
+<div class="flex flex-col gap-1">
+<label class="font-mono-label-xs text-mono-label-xs uppercase text-on-surface-variant tracking-wider flex justify-between">
+<span>PRINCIPAL LOCK AMOUNT</span>
+<span class="text-on-surface">Available: 420.50 GEN</span>
+</label>
+<div class="relative flex items-center bg-surface-container-lowest">
+<span class="material-symbols-outlined text-outline text-[18px] ml-space-md">lock</span>
+<input class="w-full bg-transparent px-space-md py-space-sm text-primary font-mono-metric-md text-mono-metric-md focus:outline-none focus:text-primary-fixed" id="input-amount" oninput="updateAmountDisplay(this.value)" step="10.0" type="number" value="500.00"/>
+<span class="font-mono-data-sm text-mono-data-sm text-primary-fixed font-bold mr-space-md uppercase">TEST GEN</span>
+</div>
+</div>
+<!-- ZERO-HAIRCUT SETTLEMENT RULE CALLOUT -->
+<div class="bg-surface-container p-space-md flex items-start gap-space-sm">
+<span class="material-symbols-outlined text-primary-fixed text-[24px] shrink-0">balance</span>
+<div class="flex flex-col gap-1">
+<span class="font-mono-label-xs text-mono-label-xs uppercase font-bold text-primary-fixed tracking-wider">
+                DETERMINISTIC 100% DISBURSEMENT POLICY
+              </span>
+<p class="font-body-md text-body-md text-on-surface">
+<strong>100% payout</strong> to recipient if verified <span class="text-primary-fixed">RELEASED</span> within active window. <strong>100% full refund</strong> directly to funder on <span class="text-error">REFUND_NOHIT</span>, <span class="text-secondary">INSUFFICIENT</span>, <span class="text-secondary">CANCELED</span>, or <span class="text-secondary">EXPIRED</span>. Zero protocol haircut, zero arbiter split, zero custodial hold.
+              </p>
+</div>
+</div>
+</div>
+<!-- STEP 06: TRIGGER / CONFIRM ACTION AREA -->
+<div class="bg-surface-container-low p-space-lg flex flex-col gap-space-md">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-space-sm">
+<span class="px-2 py-0.5 bg-primary-container text-on-primary-container font-mono-label-xs text-mono-label-xs uppercase tracking-wider font-black">STAGE 06</span>
+<h2 class="font-headline-md text-headline-md text-primary">Final Verification &amp; Commit</h2>
+</div>
+<span class="font-mono-label-xs text-mono-label-xs text-primary-fixed font-mono">[CHAIN: 61997]</span>
+</div>
+<div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-space-md pt-space-xs">
+<div class="flex flex-col">
+<span class="font-mono-label-xs text-mono-label-xs text-on-surface-variant uppercase tracking-wider">TOTAL ESCROW COMMITTED</span>
+<span class="font-mono-metric-lg text-mono-metric-lg text-primary-fixed font-bold tracking-tight" id="display-commit-amount">500.00 GEN</span>
+<span class="font-mono-data-sm text-mono-data-sm text-outline">+ Gas est. ~0.00018 GEN</span>
+</div>
+<button class="px-space-xl py-space-md bg-primary-container text-on-primary-container hover:bg-primary hover:text-on-primary font-headline-sm text-headline-sm uppercase tracking-tight flex items-center justify-center gap-space-sm transition-all shadow-xl font-bold" onclick="openModal()">
+<span>Confirm &amp; Lock 500 test GEN</span>
+<span class="material-symbols-outlined text-[20px]">arrow_forward</span>
+</button>
+</div>
+</div>
+</div>
+<!-- RIGHT INDUSTRIAL TELEMETRY SUMMARY DOCK (5 COLS) -->
+<div class="lg:col-span-5 flex flex-col gap-space-lg sticky top-20">
+<!-- ASYMMETRIC ACID-YELLOW ANCHOR BLOCK (TRACKWELL DESIGN PILLAR) -->
+<div class="bg-primary-container text-on-primary-container p-space-lg flex flex-col justify-between min-h-[300px] shadow-xl relative overflow-hidden">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-space-xs font-mono-label-xs text-mono-label-xs uppercase tracking-widest font-black">
+<span class="material-symbols-outlined text-[16px]">lock_clock</span>
+<span>ESCROW TELEMETRY ANCHOR</span>
+</div>
+<span class="font-mono-label-xs text-mono-label-xs font-mono bg-surface-dim text-primary-fixed px-1.5 py-0.5">READY</span>
+</div>
+<div class="flex flex-col my-space-md">
+<span class="font-mono-label-xs text-mono-label-xs uppercase tracking-widest text-on-primary font-bold">LOCK IDENTIFIER PRE-IMAGE</span>
+<div class="font-display-lg text-display-lg font-normal tracking-tighter leading-none text-on-primary-container mt-1">
+              #0x4B28
+            </div>
+<span class="font-mono-data-sm text-mono-data-sm text-on-primary mt-2">Deterministic contract salt computed from release coordinates.</span>
+</div>
+<div class="grid grid-cols-2 gap-space-sm pt-space-md bg-on-primary-container/10 p-space-sm">
+<div class="flex flex-col">
+<span class="font-mono-label-xs text-mono-label-xs uppercase text-on-primary">SETTLEMENT SLA</span>
+<span class="font-mono-metric-md text-mono-metric-md font-bold text-on-primary-container">Sub-second</span>
+</div>
+<div class="flex flex-col">
+<span class="font-mono-label-xs text-mono-label-xs uppercase text-on-primary">VERIFICATION</span>
+<span class="font-mono-metric-md text-mono-metric-md font-bold text-on-primary-container">Automated</span>
+</div>
+</div>
+</div>
+<!-- IMMUTABLE CONTRACT PARAMETERS MANIFEST CARD -->
+<div class="bg-surface-container-low p-space-lg flex flex-col gap-space-md">
+<div class="flex items-center justify-between pb-space-xs bg-surface-container-lowest px-space-sm py-1">
+<span class="font-mono-label-xs text-mono-label-xs text-primary-fixed uppercase tracking-wider font-bold">
+              CAD SPECIFICATION INSPECTOR
+            </span>
+<span class="font-mono-label-xs text-mono-label-xs text-on-surface-variant">[SPEC_HASH: 0x90A...11F4]</span>
+</div>
+<!-- ISOMETRIC FLOW CHART SVG -->
+<div class="bg-surface-container-lowest p-space-md flex flex-col items-center justify-center">
+<svg class="w-full h-32 text-primary-fixed" fill="none" viewbox="0 0 400 120" xmlns="http://www.w3.org/2000/svg">
+<!-- Grid background -->
+<line stroke="currentColor" stroke-opacity="0.08" stroke-width="1" x1="0" x2="400" y1="20" y2="20"></line>
+<line stroke="currentColor" stroke-opacity="0.08" stroke-width="1" x1="0" x2="400" y1="60" y2="60"></line>
+<line stroke="currentColor" stroke-opacity="0.08" stroke-width="1" x1="0" x2="400" y1="100" y2="100"></line>
+<line stroke="currentColor" stroke-opacity="0.08" stroke-width="1" x1="80" x2="80" y1="0" y2="120"></line>
+<line stroke="currentColor" stroke-opacity="0.08" stroke-width="1" x1="200" x2="200" y1="0" y2="120"></line>
+<line stroke="currentColor" stroke-opacity="0.08" stroke-width="1" x1="320" x2="320" y1="0" y2="120"></line>
+<!-- Box 1: Funder Vault -->
+<rect fill="#201f1f" height="50" stroke="currentColor" stroke-opacity="0.4" stroke-width="1" width="80" x="20" y="35"></rect>
+<text fill="#ffffff" font-family="Space Grotesk" font-size="10" text-anchor="middle" x="60" y="58">FUNDER</text>
+<text fill="#d8ee48" font-family="JetBrains Mono" font-size="9" text-anchor="middle" x="60" y="72">500 GEN</text>
+<!-- Connection Arrow 1 -->
+<path d="M 100 60 L 150 60" stroke="currentColor" stroke-dasharray="3 3" stroke-width="1.5"></path>
+<polygon fill="currentColor" points="150,60 144,57 144,63"></polygon>
+<!-- Box 2: GenLayer Smart Escrow -->
+<rect fill="#2a2a2a" height="70" stroke="#d8ee48" stroke-width="1.5" width="100" x="150" y="25"></rect>
+<text fill="#d8ee48" font-family="Space Grotesk" font-size="11" font-weight="bold" text-anchor="middle" x="200" y="50">GENLAYER</text>
+<text fill="#ffffff" font-family="JetBrains Mono" font-size="9" text-anchor="middle" x="200" y="65">CAD Escrow</text>
+<text fill="#c7c8af" font-family="JetBrains Mono" font-size="8" text-anchor="middle" x="200" y="80">7D UTC Window</text>
+<!-- Connection Arrow 2 -->
+<path d="M 250 60 L 300 60" stroke="currentColor" stroke-width="1.5"></path>
+<polygon fill="currentColor" points="300,60 294,57 294,63"></polygon>
+<!-- Box 3: Recipient Payee -->
+<rect fill="#201f1f" height="50" stroke="currentColor" stroke-opacity="0.4" stroke-width="1" width="80" x="300" y="35"></rect>
+<text fill="#ffffff" font-family="Space Grotesk" font-size="10" text-anchor="middle" x="340" y="58">RECIPIENT</text>
+<text fill="#d8ee48" font-family="JetBrains Mono" font-size="9" text-anchor="middle" x="340" y="72">0x94B7...21C</text>
+</svg>
+<span class="font-mono-label-xs text-mono-label-xs text-on-surface-variant mt-1">SCHEMATIC: TIME-GATED NON-CUSTODIAL SETTLEMENT ROUTE</span>
+</div>
+<!-- KEY-VALUE MANIFEST SPEC -->
+<div class="flex flex-col gap-1 font-mono-data-sm text-mono-data-sm">
+<div class="flex items-center justify-between p-space-xs bg-surface-container">
+<span class="text-on-surface-variant">Oracle Registry Host</span>
+<span class="text-on-surface font-semibold" id="summary-registry">pypi.org</span>
+</div>
+<div class="flex items-center justify-between p-space-xs bg-surface-container">
+<span class="text-on-surface-variant">Package Name</span>
+<span class="text-primary-fixed font-semibold" id="summary-pkg">fastapi-auth-guards</span>
+</div>
+<div class="flex items-center justify-between p-space-xs bg-surface-container">
+<span class="text-on-surface-variant">Exact Semver</span>
+<span class="text-primary-fixed font-semibold" id="summary-ver">0.4.2</span>
+</div>
+<div class="flex items-center justify-between p-space-xs bg-surface-container">
+<span class="text-on-surface-variant">Evaluation Window</span>
+<span class="text-on-surface">168 Hours (7.0 Days)</span>
+</div>
+<div class="flex items-center justify-between p-space-xs bg-surface-container">
+<span class="text-on-surface-variant">Minimum Oracle Quorum</span>
+<span class="text-on-surface font-semibold">100% Consensus (5/5)</span>
+</div>
+<div class="flex items-center justify-between p-space-xs bg-surface-container">
+<span class="text-on-surface-variant">Escrow State Initialization</span>
+<span class="px-2 py-0.5 bg-primary-container text-on-primary-container font-mono-label-xs text-mono-label-xs font-bold uppercase">OPEN</span>
+</div>
+</div>
+<!-- HARDWARE AUDIT LOG TAPE -->
+<div class="bg-surface-container-lowest p-space-md flex flex-col gap-1 text-[11px] font-mono-data-sm text-outline">
+<div class="flex justify-between text-on-surface-variant">
+<span>[AUDIT_SEQ: 009284]</span>
+<span class="text-primary-fixed">OK</span>
+</div>
+<p class="text-on-surface-variant">
+              &gt; Handshake verified with GenLayer Studio Next node.<br/>
+              &gt; Cryptographic pre-image salt generated.<br/>
+              &gt; Ready for smart contract allocation on chain 61997.
+            </p>
+</div>
+</div>
+<!-- REASSURANCE BADGE -->
+<div class="bg-surface-container-lowest p-space-md flex items-center gap-space-sm">
+<span class="material-symbols-outlined text-primary-fixed text-[20px]">verified_user</span>
+<div class="flex flex-col">
+<span class="font-headline-sm text-[12px] uppercase text-primary">Self-Executing Solidity Architecture</span>
+<span class="font-mono-data-sm text-[11px] text-on-surface-variant">Zero custody escrow contract audited for GenLayer protocol.</span>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- CONFIRMATION & LOCK MODAL (HIDDEN BY DEFAULT) -->
+<div class="fixed inset-0 z-50 bg-background/80 backdrop-blur-md hidden flex items-center justify-center p-space-sm" id="review-modal">
+<div class="bg-surface-container-low max-w-2xl w-full p-space-lg flex flex-col gap-space-lg shadow-2xl relative">
+<div class="flex items-start justify-between">
+<div class="flex flex-col">
+<span class="font-mono-label-xs text-mono-label-xs text-primary-fixed uppercase tracking-wider font-bold">CONFIRMATION PROTOCOL</span>
+<h3 class="font-headline-lg text-headline-lg text-primary tracking-tight">Review &amp; Lock Smart Escrow</h3>
+</div>
+<button class="w-8 h-8 bg-surface-container flex items-center justify-center text-on-surface hover:text-primary-fixed" onclick="closeModal()">
+<span class="material-symbols-outlined text-[18px]">close</span>
+</button>
+</div>
+<div class="bg-surface-container p-space-md flex flex-col gap-space-xs font-mono-data-sm text-mono-data-sm">
+<div class="flex justify-between text-on-surface-variant pb-1">
+<span>REGISTRY</span>
+<span class="text-on-surface font-semibold">PyPI (Python Package Index)</span>
+</div>
+<div class="flex justify-between text-on-surface-variant pb-1">
+<span>TARGET ARTIFACT</span>
+<span class="text-primary-fixed font-semibold">fastapi-auth-guards @ 0.4.2</span>
+</div>
+<div class="flex justify-between text-on-surface-variant pb-1">
+<span>BENEFICIARY ADDRESS</span>
+<span class="text-on-surface font-mono">0x94B7f8...e21C</span>
+</div>
+<div class="flex justify-between text-on-surface-variant pb-1">
+<span>RELEASE EPOCH</span>
+<span class="text-on-surface">2025-05-10 12:00 UTC - 2025-05-17 12:00 UTC</span>
+</div>
+<div class="flex justify-between text-on-surface-variant pt-2 bg-surface-container-lowest p-space-xs">
+<span class="text-primary-fixed font-bold">PRINCIPAL ESCROW AMOUNT</span>
+<span class="text-primary-fixed font-bold text-mono-metric-md" id="modal-amount">500.00 TEST GEN</span>
+</div>
+</div>
+<div class="p-space-sm bg-surface-container-lowest text-on-surface-variant font-mono-data-sm text-[11px] flex items-center gap-space-sm">
+<span class="material-symbols-outlined text-primary-fixed text-[18px]">info</span>
+<span>Action will sign transaction <code>lockEscrow(bytes32, address, uint256)</code> on GenLayer Studio Next (61997).</span>
+</div>
+<div class="flex items-center justify-end gap-space-md">
+<button class="px-space-md py-space-xs bg-surface-container hover:bg-surface-container-high text-on-surface font-headline-sm text-body-md uppercase" onclick="closeModal()">
+          Abort
+        </button>
+<button class="px-space-xl py-space-md bg-primary-container text-on-primary-container hover:bg-primary font-headline-sm text-headline-sm uppercase font-bold flex items-center gap-space-xs shadow-lg" onclick="broadcastTransaction()">
+<span>Execute &amp; Broadcast TX</span>
+<span class="material-symbols-outlined text-[18px]">bolt</span>
+</button>
+</div>
+</div>
+</div>
+<!-- SUCCESS HUD NOTIFICATION BANNER (TRIGGERED UPON TX BROADCAST) -->
+<div class="fixed bottom-6 right-6 z-50 bg-primary-container text-on-primary-container p-space-md max-w-md hidden shadow-2xl flex items-start gap-space-sm" id="tx-success-toast">
+<span class="material-symbols-outlined text-primary-container bg-surface-dim p-1 text-[20px] shrink-0">check_circle</span>
+<div class="flex flex-col gap-1">
+<span class="font-headline-sm text-[14px] uppercase font-bold tracking-tight">Escrow Locked Successfully</span>
+<span class="font-mono-data-sm text-[12px]">TX Hash: 0x82f9104b901a...712d9c</span>
+<span class="font-mono-label-xs text-[10px] text-on-primary">STATUS: OPEN // CAD LOCK #0x4B28 COMMITTED</span>
+</div>
+</div>
+</div>
+<script>
+  function selectTemplate(type) {
+    const pypiBtn = document.getElementById('tpl-pypi');
+    const npmBtn = document.getElementById('tpl-npm');
+    const previewUrl = document.getElementById('feed-preview-url');
+    const summaryRegistry = document.getElementById('summary-registry');
+    const pkg = document.getElementById('input-pkg').value || 'pkg';
+    const ver = document.getElementById('input-ver').value || '0.0.1';
+
+    if (type === 'PYPI') {
+      pypiBtn.className = 'flex flex-col items-start p-space-md bg-surface-container text-left transition-all relative';
+      npmBtn.className = 'flex flex-col items-start p-space-md bg-surface-container-lowest hover:bg-surface-container transition-all text-left group';
+      previewUrl.innerText = `https://pypi.org/pypi/${pkg}/${ver}/json`;
+      if (summaryRegistry) summaryRegistry.innerText = 'pypi.org';
+    } else {
+      npmBtn.className = 'flex flex-col items-start p-space-md bg-surface-container text-left transition-all relative';
+      pypiBtn.className = 'flex flex-col items-start p-space-md bg-surface-container-lowest hover:bg-surface-container transition-all text-left group';
+      previewUrl.innerText = `https://registry.npmjs.org/${pkg}/${ver}`;
+      if (summaryRegistry) summaryRegistry.innerText = 'registry.npmjs.org';
+    }
+  }
+
+  function updateFeedPreview() {
+    const pkg = document.getElementById('input-pkg').value || 'pkg';
+    const ver = document.getElementById('input-ver').value || '0.0.1';
+    const previewUrl = document.getElementById('feed-preview-url');
+    const summaryPkg = document.getElementById('summary-pkg');
+    const summaryVer = document.getElementById('summary-ver');
+
+    previewUrl.innerText = `https://pypi.org/pypi/${pkg}/${ver}/json`;
+    if (summaryPkg) summaryPkg.innerText = pkg;
+    if (summaryVer) summaryVer.innerText = ver;
+  }
+
+  function updateAmountDisplay(val) {
+    const amountVal = parseFloat(val) || 0;
+    const formatted = amountVal.toFixed(2) + ' GEN';
+    const commitDisp = document.getElementById('display-commit-amount');
+    const modalDisp = document.getElementById('modal-amount');
+    if (commitDisp) commitDisp.innerText = formatted;
+    if (modalDisp) modalDisp.innerText = formatted;
+  }
+
+  function setActiveStep(stepNum) {
+    // Interactive step tracker scroll or focus
+    console.log("Navigating to stage: " + stepNum);
+  }
+
+  function openModal() {
+    document.getElementById('review-modal').classList.remove('hidden');
+  }
+
+  function closeModal() {
+    document.getElementById('review-modal').classList.add('hidden');
+  }
+
+  function broadcastTransaction() {
+    closeModal();
+    const toast = document.getElementById('tx-success-toast');
+    toast.classList.remove('hidden');
+    setTimeout(() => {
+      toast.classList.add('hidden');
+    }, 6000);
+  }
+</script></main><footer class="w-full bg-surface-container-lowest py-space-xl"><div class="w-full px-margin-sm md:px-margin flex flex-col gap-space-lg"><div class="grid grid-cols-1 md:grid-cols-4 gap-space-lg"><div class="flex flex-col gap-space-xs"><div class="flex items-center gap-space-sm"><span class="font-headline-sm text-headline-sm text-primary uppercase">ShipLock</span><span class="font-mono-label-xs text-mono-label-xs px-1.5 py-0.5 bg-primary-container text-on-primary-container font-semibold">TESTNET</span></div><p class="font-mono-data-sm text-mono-data-sm text-on-surface-variant">Programmatic smart escrow for decentralized registry artifact publication and validation.</p></div><div class="flex flex-col gap-space-xs"><span class="font-mono-label-xs text-mono-label-xs text-outline uppercase tracking-wider">GENLAYER NETWORK SPEC</span><div class="flex flex-col gap-1 font-mono-data-sm text-mono-data-sm"><div class="flex justify-between text-on-surface-variant"><span>Chain ID</span><span class="text-on-surface">61997</span></div><div class="flex justify-between text-on-surface-variant"><span>RPC Endpoint</span><a class="text-primary-fixed hover:underline truncate max-w-[140px]" href="https://studio-dev.genlayer.com/api" target="_blank">studio-dev.genlayer.com</a></div><div class="flex justify-between text-on-surface-variant"><span>Studio Explorer</span><a class="text-primary-fixed hover:underline" href="https://explorer-studio-dev.genlayer.com/" target="_blank">explorer-studio-dev</a></div></div></div><div class="flex flex-col gap-space-xs"><span class="font-mono-label-xs text-mono-label-xs text-outline uppercase tracking-wider">OFFICIAL FEEDS &amp; REGISTRIES</span><div class="flex flex-col gap-1 font-mono-data-sm text-mono-data-sm"><div class="flex items-center justify-between text-on-surface-variant"><span>PyPI Sync Feed</span><span class="text-on-surface flex items-center gap-1"><span class="inline-block w-1.5 h-1.5 rounded-full bg-primary-fixed"></span>SYNCHRONIZED</span></div><div class="flex items-center justify-between text-on-surface-variant"><span>npm Verified Mirror</span><span class="text-on-surface flex items-center gap-1"><span class="inline-block w-1.5 h-1.5 rounded-full bg-primary-fixed"></span>SYNCHRONIZED</span></div><div class="flex items-center justify-between text-on-surface-variant"><span>Oracle Quorum</span><span class="text-on-surface">5/5 LEADERLESS</span></div></div></div><div class="flex flex-col gap-space-xs"><span class="font-mono-label-xs text-mono-label-xs text-outline uppercase tracking-wider">CORE CONTRACT SUITE</span><div class="flex flex-col gap-1 font-mono-data-sm text-mono-data-sm"><div class="flex justify-between text-on-surface-variant"><span>Escrow Settlement</span><span class="text-secondary">0x90A...11F4</span></div><div class="flex justify-between text-on-surface-variant"><span>Hash Notarizer</span><span class="text-secondary">0x42B...DE90</span></div><div class="flex justify-between text-on-surface-variant"><span>Settlement SLA</span><span class="text-primary-fixed">Sub-second</span></div></div></div></div><div class="pt-space-md flex flex-col md:flex-row items-start md:items-center justify-between gap-space-sm bg-surface-container-low px-space-md py-space-sm"><div class="flex items-center gap-space-sm font-mono-data-sm text-mono-data-sm text-error"><span class="material-symbols-outlined text-[16px]">info</span><span>TESTNET DISCLAIMER: All escrow, payouts, and refunds are test GEN with no real monetary value.</span></div><div class="font-mono-label-xs text-mono-label-xs text-on-surface-variant">[LOC: GENLAYER_STUDIO // 0x61997_DEV]</div></div><div class="flex flex-col sm:flex-row items-center justify-between text-on-surface-variant font-mono-label-xs text-mono-label-xs pt-space-xs"><span>© 2025 SHIPLOCK ESCROW PROTOCOL. ARCHITECTURAL CAD SUITE.</span><div class="flex items-center gap-space-md"><span>STATUS: OPERATIONAL</span><span>LATENCY: 42MS</span><span>INDEXER: ONLINE</span></div></div></div></footer></body></html>

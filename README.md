@@ -16,8 +16,8 @@ Same write. No docket. No appeal UI. No court.
 | Chain ID | 61997 (`0xF22D`) |
 | RPC | https://studio-dev.genlayer.com/api |
 | Explorer | https://explorer-studio-dev.genlayer.com/ |
-| **Contract** | `0xc7464f6d5F14559f878528730333D74481c4d00f` |
-| Contract explorer | https://explorer-studio-dev.genlayer.com/address/0xc7464f6d5F14559f878528730333D74481c4d00f |
+| **Contract** | `0xF52d9FD2a1542b3F84417a916f3aB4B4631D0b3D` |
+| Contract explorer | https://explorer-studio-dev.genlayer.com/address/0xF52d9FD2a1542b3F84417a916f3aB4B4631D0b3D |
 | Tests | `python -m pytest tests/direct -q` → **25 passed** |
 | Manual proof | fund 2 GEN OPEN → funder Cancel → CANCELED + native refund |
 
@@ -93,7 +93,7 @@ Wallet must be on chain 61997. Faucet: Studio Next account dropdown.
 ## Vercel
 Root directory: `web`
 Env (Production + Preview):
-- `NEXT_PUBLIC_CONTRACT_ADDRESS` = `0xc7464f6d5F14559f878528730333D74481c4d00f`
+- `NEXT_PUBLIC_CONTRACT_ADDRESS` = `0xF52d9FD2a1542b3F84417a916f3aB4B4631D0b3D`
 - `NEXT_PUBLIC_CHAIN_ID` = `61997`
 - `NEXT_PUBLIC_STUDIO_RPC` = `https://studio-dev.genlayer.com/api`
 - `NEXT_PUBLIC_EXPLORER` = `https://explorer-studio-dev.genlayer.com`

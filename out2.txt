@@ -1,0 +1,714 @@
+Title: Live Content
+Description: Fetched live
+Source: https://docs.genlayer.com/developers/intelligent-contracts/features/value-transfers
+---
+Value Transfers | GenLayer Documentation
+Skills 🤖
+Skills 🤖
+ (opens in a new tab)
+Blog 📚
+Blog 📚
+ (opens in a new tab)
+Bulk Download 🤖
+Bulk Download 🤖
+ (opens in a new tab)
+Copy page
+Welcome to GenLayer
+Discover the Protocol
+What is GenLayer
+How GenLayer Works
+Use Cases
+Core Concepts
+GenLayer Chain Integration
+Accounts and Addresses
+GenVM
+Non-deterministic Operations
+LLM Integration
+Web Data Access
+Validators and Roles
+Optimistic Democracy
+Equivalence Principle
+Appeals
+Deterministic Violations &amp; Tribunals
+Protocol Randomness
+Finality
+Staking
+Slashing
+Unstaking
+Transactions
+Transaction Types
+Transaction Execution
+Transaction Statuses
+Encoding and Signing
+Economic Model
+Build on GenLayer
+Networks &amp; RPCs
+Consensus v0.6 Migration
+Intelligent Contracts
+Introduction to Intelligent Contracts
+When to Use GenLayer
+Feature List
+Storage Reference
+Error Handling
+Upgradability
+Value Transfers
+Transaction Context
+Messages
+Interacting with Intelligent Contracts
+Interacting with EVM Contracts
+Special Methods
+Vector Storage
+Debugging Code
+Random
+Non-determinism
+Calling LLMs
+Image Processing
+Web Access
+Balances
+Development Setup
+Your First Contract
+Types
+Address Type
+Primitive Types
+Collection Types
+Dataclasses
+Contract Storage
+Your First Intelligent Contract
+Equivalence Principle
+Debugging in Studio
+Testing
+Deploying
+Deployment Methods
+Network Configuration
+CLI Deployment
+Deploy Scripts
+Prompt &amp; Data Techniques
+Security and Best Practices
+Prompt Injection
+Examples
+Storage
+User Storage
+LLM Hello World
+LLM Hello World Non-Comparative
+Wizard of Coin
+Fetch Web Content
+Fetch Github Profile
+Github Profile Projects
+Github Profile Summary
+Football Prediction Market
+Vector Store Log Indexer
+Tools
+GenLayer CLI
+GenLayer Studio
+Loading a Contract
+Deploying a Contract
+Reading the Contract State
+Executing a Transaction
+Monitoring Node Logs
+Validators
+Providers
+Limitations
+Reset the Studio
+Troubleshooting
+Development Tips
+Advanced Features
+Adding Custom LLM Providers
+Ideas
+Frontend &amp; SDK Integration
+Architecture Overview
+DApp Development Workflow
+GenLayer JS
+Querying a Transaction
+Reading Data from Intelligent Contracts
+Writing Data to Intelligent Contracts
+Fees &amp; Transaction Policy
+Transaction Kit Integration
+Fee Profiling &amp; Estimation
+Fee Outcomes &amp; Debugging
+Developer NFT Rewards
+Testing in Studio
+Project Boilerplate
+Error &amp; Revert Reference
+Staking Contract Guide
+Run a Validator
+Setup Guide
+Monitoring &amp; Telemetry
+Network Keeper Roles
+System Requirements
+GenVM Configuration
+Upgrade Guide
+Changelog
+API References
+GenLayer CLI
+Overview
+Environment
+init
+up
+stop
+new
+update
+update ollama
+Contracts
+deploy
+call
+write
+schema
+code
+Transactions
+receipt
+trace
+appeal
+appeal-bond
+Configuration
+config
+config get
+config reset
+config set
+network
+network info
+network list
+network set
+Accounts
+account
+account create
+account export
+account import
+account list
+account lock
+account remove
+account send
+account show
+account unlock
+account use
+Staking
+staking
+staking active-validators
+staking banned-validators
+staking delegation-info
+staking delegator-claim
+staking delegator-exit
+staking delegator-join
+staking epoch-info
+staking prime-all
+staking quarantined-validators
+staking set-identity
+staking set-operator
+staking validator-claim
+staking validator-deposit
+staking validator-exit
+staking validator-history
+staking validator-info
+staking validator-join
+staking validator-prime
+staking validators
+staking wizard
+Localnet
+localnet
+localnet validators
+localnet validators count
+localnet validators create
+localnet validators create-random
+localnet validators delete
+localnet validators get
+localnet validators update
+finalize
+finalize-batch
+GenLayerJS
+Contracts
+Transactions
+Staking
+GenLayerPY
+API Reference
+GenLayer Test
+Integration Testing
+Direct Mode
+glsim
+GenLayer Node API
+GenLayer Methods
+gen_call
+gen_getContractSchema
+gen_getContractState
+gen_getContractCode
+gen_getTransactionReceipt
+gen_getTransactionStatus
+gen_getTransactionLifecycle
+gen_syncing
+Debug Methods
+gen_dbg_ping
+gen_dbg_trie
+gen_dbg_traceTransaction
+Ops Methods
+balance
+health
+metrics
+snapshot
+GenVM Linter
+GenVM SDK ↗
+ (opens in a new tab)
+Partners
+GenLayer Labs
+Heurist
+io.net
+Comput3
+Chutes
+LibertAI
+Morpheus
+FAQ
+Light
+On This Page
+Native Token (GEN)
+Receiving Value
+Sending Value to Another Intelligent Contract
+How Value Flows
+Sending Value to an EOA or EVM Contract
+Reading Balances
+Where Balance Lives
+Receiving Value Without a Method Call
+Funding Accounts
+Calling Payable Methods from JavaScript
+Question? Give us feedback →
+ (opens in a new tab)
+Edit this page
+Build on GenLayer
+Intelligent Contracts
+Feature List
+Value Transfers
+Value Transfers
+Value transfers in Intelligent Contracts use GEN, GenLayer&#x27;s native token, to receive funds with payable methods, send value through messages, and read contract balances.
+Native Token (GEN)
+GenLayer uses GEN as its native token. Values are denominated in wei (1 GEN = 10¹⁸ wei). Use the 
+u256
+ type for value amounts in contract code.
+Receiving Value
+Mark a method as payable with 
+@gl.public.write.payable
+ to accept GEN:
+from
+ genlayer 
+import
+*
+class
+TipJar
+(
+gl
+.
+Contract
+):
+def
+__init__
+(
+self
+):
+        self
+.
+total_tips 
+=
+u256
+(
+0
+)
+@gl
+.
+public
+.
+write
+.
+payable
+def
+tip
+(
+self
+) 
+-&gt;
+None
+:
+        v 
+=
+ gl
+.
+message
+.
+value
+if
+ v 
+==
+u256
+(
+0
+):
+raise
+ gl
+.
+vm
+.
+UserError
+(
+&quot;send some value&quot;
+)
+        self
+.
+total_tips 
+=
+ self
+.
+total_tips 
++
+ v
+@gl
+.
+public
+.
+view
+def
+get_tips
+(
+self
+) 
+-&gt;
+ u256:
+return
+ self
+.
+total_tips
+gl.message.value
+ is a 
+u256
+ containing the GEN sent with the call. It is only available in methods decorated with 
+@gl.public.write.payable
+.
+Sending Value to Another Intelligent Contract
+Send value to another IC using 
+internal messages
+:
+other 
+=
+ gl
+.
+get_contract_at
+(recipient_address)
+# Pure value transfer (triggers __receive__ on recipient)
+other
+.
+emit_transfer
+(value
+=
+u256
+(amount), on
+=
+&#x27;finalized&#x27;
+)
+# Value + method call (recipient method must be payable)
+other
+.
+emit
+(value
+=
+u256
+(amount), on
+=
+&#x27;finalized&#x27;
+).
+deposit
+()
+How Value Flows
+When a message with value is emitted, the value is 
+immediately deducted
+ from the sending contract&#x27;s balance and held in the message. It is only credited to the recipient when the message&#x27;s child transaction is activated. The flow is:
+Sender balance → message → recipient balance
+If the child transaction fails, the value is not automatically returned to the sender.
+See 
+Messages
+ for details on timing (
+on=&#x27;accepted&#x27;
+ vs 
+on=&#x27;finalized&#x27;
+).
+Sending Value to an EOA or EVM Contract
+Sending to an address on the GenLayer Chain (EOA or EVM contract) is an 
+external message
+. It goes through the IC&#x27;s 
+ghost contract
+ and always executes on finalization.
+@gl
+.
+evm
+.
+contract_interface
+class
+_Recipient
+:
+class
+View
+:
+pass
+class
+Write
+:
+pass
+class
+Faucet
+(
+gl
+.
+Contract
+):
+@gl
+.
+public
+.
+write
+.
+payable
+def
+send
+(
+self
+,
+recipient
+:
+str
+) 
+-&gt;
+None
+:
+        v 
+=
+ gl
+.
+message
+.
+value
+if
+ v 
+==
+u256
+(
+0
+):
+raise
+ gl
+.
+vm
+.
+UserError
+(
+&quot;send some value&quot;
+)
+_Recipient
+(
+Address
+(recipient)).
+emit_transfer
+(value
+=
+v)
+The syntax for sending to an EOA uses the EVM contract interface even though the recipient is not a contract. This is because EOAs live on the chain layer, making this an external message — the same mechanism used for calling EVM contracts. This will be simplified in a future version.
+Reading Balances
+# Own contract balance
+my_balance 
+=
+ self
+.
+balance
+# Another IC&#x27;s balance
+other_balance 
+=
+ gl
+.
+get_contract_at
+(addr).
+balance
+# EVM contract balance
+evm_balance 
+=
+EthContract
+(addr).
+balance
+In 
+write
+ methods, 
+self.balance
+ reflects the current state including any value received in the current call. In 
+view
+ methods, it shows a snapshot without modifications.
+Where Balance Lives
+On the GenLayer network, an IC&#x27;s GEN balance is held by its 
+ghost contract
+ on the chain layer. 
+self.balance
+ reads from this. The balance is visible on both layers.
+⚠️
+Studio:
+ Balances are simulated in a local database. There is no EVM layer or ghost contracts in Studio.
+Receiving Value Without a Method Call
+When value is sent without specifying a method, the contract can handle it with special methods:
+class
+Contract
+(
+gl
+.
+Contract
+):
+@gl
+.
+public
+.
+write
+.
+payable
+def
+__receive__
+(
+self
+):
+&quot;&quot;&quot;Called for value-only transfers with no method name.&quot;&quot;&quot;
+pass
+@gl
+.
+public
+.
+write
+.
+payable
+def
+__handle_undefined_method__
+(
+self
+,
+method_name
+:
+str
+,
+args
+:
+list
+,
+kwargs
+:
+dict
+    ):
+&quot;&quot;&quot;Fallback for calls to undefined methods.&quot;&quot;&quot;
+pass
+The dispatch logic:
+Funding Accounts
+Environment
+How to fund
+Studio (Localnet)
+Built-in faucet — 💧 button in the account selector
+Studionet
+Built-in faucet — 💧 button in the account selector
+Studio development preview
+Built-in faucet — 💧 button in the account selector
+Testnet Asimov
+testnet-faucet.genlayer.foundation
+ (opens in a new tab)
+Testnet Bradbury
+testnet-faucet.genlayer.foundation
+ (opens in a new tab)
+See 
+Networks
+ for full details on each environment.
+Calling Payable Methods from JavaScript
+Use the 
+value
+ parameter in 
+writeContract()
+ to send GEN. On a fee-charging deployment, estimate and submit the protocol fee separately:
+import
+ { createClient
+,
+ createAccount } 
+from
+&#x27;genlayer-js&#x27;
+;
+import
+ { testnetAsimov } 
+from
+&#x27;genlayer-js/chains&#x27;
+;
+const
+client
+=
+createClient
+({
+  chain
+:
+ testnetAsimov
+,
+  account
+:
+createAccount
+()
+,
+});
+const
+write
+=
+ {
+  address
+:
+ contractAddress
+,
+  functionName
+:
+&#x27;tip&#x27;
+,
+  args
+:
+ []
+,
+  value
+:
+5
+n
+*
+10
+n
+**
+18
+n
+,
+// 5 GEN sent to the contract
+};
+const
+estimate
+=
+await
+client
+.estimateTransactionFeesForWrite
+(write);
+const
+txId
+=
+await
+client
+.writeContract
+({
+...
+write
+,
+  fees
+:
+ {
+    distribution
+:
+estimate
+.distribution
+,
+    feeValue
+:
+estimate
+.feeValue
+,
+  }
+,
+});
+The wallet must cover 
+value + feeValue
+. See 
+Writing to Intelligent Contracts
+ for lifecycle and duplicate-submission guidance.
+Upgradability
+Transaction Context
+Light
+GenLayer Documentation

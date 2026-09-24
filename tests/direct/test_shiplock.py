@@ -317,7 +317,7 @@ def test_list_ids_matches_get_escrow_ids(base_contract, direct_vm, direct_bob):
     direct_vm.warp("2026-01-01T00:00:00Z")
     mock_registry(direct_vm, load_fix("pypi_404.json"), status=404)
     fund(base_contract, direct_vm, direct_bob, "2026-03-01T00:00:00Z", "2026-03-05T00:00:00Z", 10 * WEI)
-    fund(base_contract, direct_vm, direct_bob, "2026-03-01T00:00:00Z", "2026-03-05T00:00:00Z", 10 * WEI)
+    fund(base_contract, direct_vm, direct_bob, "2026-03-01T00:00:00Z", "2026-03-05T00:00:00Z", 20 * WEI)
     
     assert base_contract.list_ids() == base_contract.get_escrow_ids()
     assert len(base_contract.list_ids()) == 2

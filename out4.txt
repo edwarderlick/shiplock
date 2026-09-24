@@ -1,0 +1,1090 @@
+﻿# { "Depends": "py-genlayer:5jycge4q8k23462jtb0b9fyey1s9qz928sz2nbrd9mg4sxqg2qng" }
+
+import hashlib
+import json
+import re
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from typing import Any
+
+import genlayer as gl
+from genlayer.storage import allow as allow_storage
+
+Address = gl.Address
+u256 = gl.u256
+TreeMap = gl.storage.TreeMap
+DynArray = gl.storage.DynArray
+
+
+MAX_BODY = 32 * 1024
+MAX_RESULTS = 100
+WINDOW_MIN_DAYS = 1
+WINDOW_MAX_DAYS = 14
+LEAD_HOURS = 24
+LOOKBACK_DAYS = 30
+EXPIRE_GRACE_DAYS = 7
+HIT_I_MULT = 3
+HIT_II_MULT = 2
+RESERVE_MULT = 2  # extra 2x so Class I can pay 3x total
+PROTOCOL_FEE = 0
+
+T_DRUG_NDC = "DRUG_NDC"
+T_DRUG_NAME = "DRUG_NAME"
+T_DEVICE = "DEVICE_PRODUCT_CODE"
+TEMPLATES = (T_DRUG_NDC, T_DRUG_NAME, T_DEVICE)
+
+ST_OPEN = "OPEN"
+ST_HIT = "HIT"
+ST_NOHIT = "NOHIT"
+ST_INSUFFICIENT = "INSUFFICIENT"
+ST_CANCELED = "CANCELED"
+ST_EXPIRED = "EXPIRED"
+
+FDA_DRUG = "https://api.fda.gov/drug/enforcement.json"
+FDA_DEVICE = "https://api.fda.gov/device/recall.json"
+
+
+@allow_storage
+@dataclass
+class Cover:
+    cover_id: str
+    buyer: Address
+    template: str
+    product_key: str
+    window_start_utc: str
+    window_end_utc: str
+    expire_at_utc: str
+    premium: u256
+    reserve: u256
+    status: str
+    created_at: str
+    query_url: str
+    classification: str
+    matched_id: str
+    match_reason: str
+    match_date: str
+    payout: u256
+    refund: u256
+
+
+def _ue(msg: str) -> None:
+    raise gl.vm.UserError(msg)
+
+
+def _msg_raw() -> dict:
+    try:
+        raw = getattr(gl.message, "raw", None)
+        if isinstance(raw, dict):
+            return raw
+    except Exception:
+        pass
+    try:
+        raw = getattr(gl, "message_raw", None)
+        if isinstance(raw, dict):
+            return raw
+    except Exception:
+        pass
+    return {}
+
+
+def _now() -> datetime:
+    raw = str(_msg_raw().get("datetime") or "")
+    if raw:
+        s = raw.replace("Z", "+00:00")
+        try:
+            dt = datetime.fromisoformat(s)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(timezone.utc)
+        except Exception:
+            pass
+    return datetime.now(timezone.utc)
+
+
+def _parse_utc(s: str) -> datetime:
+    t = (s or "").strip()
+    if not t:
+        _ue("empty timestamp")
+    t = t.replace(" UTC", "").replace(" utc", "").replace("Z", "+00:00")
+    if "T" not in t and " " in t:
+        t = t.replace(" ", "T", 1)
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", t):
+        t = t + "T00:00:00+00:00"
+    elif re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}", t):
+        t = t + ":00+00:00"
+    elif re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}", t):
+        t = t + "+00:00"
+    try:
+        dt = datetime.fromisoformat(t)
+    except Exception:
+        _ue("invalid timestamp")
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _iso(dt: datetime) -> str:
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _fda_day(dt: datetime) -> str:
+    return dt.astimezone(timezone.utc).strftime("%Y%m%d")
+
+
+def _digits(s: str) -> str:
+    return re.sub(r"\D", "", s or "")
+
+
+def _norm_space(s: str) -> str:
+    return re.sub(r"\s+", " ", (s or "").strip())
+
+
+def _fold(s: str) -> str:
+    return _norm_space(s).casefold()
+
+
+def _punct_stripped(s: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", _fold(s))
+
+
+def _addr_str(a: Address) -> str:
+    return str(a)
+
+
+def _split_drug_name(key: str) -> tuple[str, str]:
+    raw = _norm_space(key)
+    if "|" in raw:
+        parts = [p.strip() for p in raw.split("|")]
+    elif " AND " in raw.upper():
+        idx = raw.upper().find(" AND ")
+        parts = [raw[:idx].strip(), raw[idx + 5 :].strip()]
+    else:
+        parts = raw.split()
+        if len(parts) < 2:
+            _ue("DRUG_NAME requires brand AND generic")
+        # reject single-token keys; still require two named sides
+        _ue("DRUG_NAME requires brand AND generic")
+    if len(parts) < 2 or not parts[0] or not parts[1]:
+        _ue("DRUG_NAME requires brand AND generic")
+    brand, generic = parts[0], parts[1]
+    if not re.search(r"[A-Za-z]", brand) or not re.search(r"[A-Za-z]", generic):
+        _ue("DRUG_NAME requires brand AND generic")
+    if _punct_stripped(brand) == _punct_stripped(generic) and " " not in brand:
+        # still two tokens, allowed if distinct names
+        pass
+    return brand, generic
+
+
+def _validate_key(template: str, product_key: str) -> None:
+    key = _norm_space(product_key)
+    if not key:
+        _ue("empty product_key")
+    low = key.casefold()
+    if "http://" in low or "https://" in low or "api.fda.gov" in low:
+        _ue("buyer cannot pass a URL")
+    if template == T_DRUG_NDC:
+        d = _digits(key)
+        if len(d) < 10 or len(d) > 11:
+            _ue("bad NDC")
+        if not re.fullmatch(r"[0-9][0-9\-]+[0-9]", key.replace(" ", "")):
+            _ue("bad NDC")
+    elif template == T_DRUG_NAME:
+        _split_drug_name(key)
+    elif template == T_DEVICE:
+        code = key.strip().upper()
+        if not re.fullmatch(r"[A-Z0-9]{3,10}", code):
+            _ue("empty device code")
+    else:
+        _ue("unknown template")
+
+
+def _as_list(v: Any) -> list[str]:
+    if v is None:
+        return []
+    if isinstance(v, list):
+        return [str(x) for x in v]
+    return [str(v)]
+
+
+def _class_rank(c: str) -> int:
+    t = (c or "").upper().replace("CLASS", "").strip()
+    if t.startswith("I") and not t.startswith("II") and not t.startswith("III"):
+        return 1
+    if "III" in t:
+        return 3
+    if "II" in t:
+        return 2
+    if t == "I":
+        return 1
+    return 0
+
+
+def _class_label(rank: int) -> str:
+    if rank == 1:
+        return "Class I"
+    if rank == 2:
+        return "Class II"
+    if rank == 3:
+        return "Class III"
+    return ""
+
+
+def _parse_fda_date(s: str) -> datetime | None:
+    t = re.sub(r"\D", "", s or "")
+    if len(t) < 8:
+        return None
+    try:
+        return datetime(int(t[0:4]), int(t[4:6]), int(t[6:8]), tzinfo=timezone.utc)
+    except Exception:
+        return None
+
+
+def _row_dates(row: dict) -> list[datetime]:
+    keys = (
+        "report_date",
+        "recall_initiation_date",
+        "event_date_initiated",
+        "event_date_posted",
+        "center_classification_date",
+    )
+    out: list[datetime] = []
+    for k in keys:
+        dt = _parse_fda_date(str(row.get(k, "")))
+        if dt is not None:
+            out.append(dt)
+    return out
+
+
+def _row_in_window(row: dict, start: datetime, end: datetime) -> bool:
+    for dt in _row_dates(row):
+        if start <= dt <= end:
+            return True
+    return False
+
+
+def _identity_match(template: str, product_key: str, row: dict) -> tuple[bool, str]:
+    openfda = row.get("openfda") if isinstance(row.get("openfda"), dict) else {}
+    if template == T_DRUG_NDC:
+        want = _digits(product_key)
+        cands: list[str] = []
+        cands += _as_list(row.get("product_ndc"))
+        cands += _as_list(row.get("package_ndc"))
+        cands += _as_list(openfda.get("product_ndc"))
+        cands += _as_list(openfda.get("package_ndc"))
+        for c in cands:
+            if _digits(c) == want:
+                return True, _digits(c)
+        return False, ""
+    if template == T_DEVICE:
+        want = product_key.strip().upper()
+        cands = _as_list(row.get("product_code")) + _as_list(openfda.get("product_code"))
+        for c in cands:
+            if str(c).strip().upper() == want:
+                return True, str(c).strip().upper()
+        return False, ""
+    brand, generic = _split_drug_name(product_key)
+    brands = _as_list(row.get("brand_name")) + _as_list(openfda.get("brand_name"))
+    gens = _as_list(row.get("generic_name")) + _as_list(openfda.get("generic_name"))
+    b_ok = any(_fold(b) == _fold(brand) for b in brands)
+    g_ok = any(_fold(g) == _fold(generic) for g in gens)
+    if b_ok and g_ok:
+        return True, f"{brand}|{generic}"
+    return False, ""
+
+
+def _punctuation_tie(template: str, product_key: str, row: dict) -> bool:
+    if template != T_DRUG_NAME:
+        return False
+    brand, generic = _split_drug_name(product_key)
+    openfda = row.get("openfda") if isinstance(row.get("openfda"), dict) else {}
+    brands = _as_list(row.get("brand_name")) + _as_list(openfda.get("brand_name"))
+    gens = _as_list(row.get("generic_name")) + _as_list(openfda.get("generic_name"))
+    b_ok = any(_punct_stripped(b) == _punct_stripped(brand) for b in brands)
+    g_ok = any(_punct_stripped(g) == _punct_stripped(generic) for g in gens)
+    exact, _ = _identity_match(template, product_key, row)
+    return b_ok and g_ok and not exact
+
+
+def _row_reason(row: dict) -> str:
+    return str(row.get("reason_for_recall") or row.get("reason") or row.get("action") or "")
+
+
+def _row_recall_id(row: dict) -> str:
+    return str(row.get("recall_number") or row.get("cfres_id") or row.get("res_event_number") or "")
+
+
+def _build_url(template: str, product_key: str, start: datetime, end: datetime, skip: int = 0) -> str:
+    a = _fda_day(start)
+    b = _fda_day(end)
+    rng = f"[{a}+TO+{b}]"
+    if template == T_DRUG_NDC:
+        ndc = _norm_space(product_key)
+        q = f'search=product_ndc:"{ndc}"+AND+report_date:{rng}&limit=100&skip={skip}'
+        return f"{FDA_DRUG}?{q}"
+    if template == T_DRUG_NAME:
+        brand, generic = _split_drug_name(product_key)
+        q = (
+            f'search=openfda.brand_name:"{brand}"+AND+openfda.generic_name:"{generic}"'
+            f"+AND+report_date:{rng}&limit=100&skip={skip}"
+        )
+        return f"{FDA_DRUG}?{q}"
+    code = product_key.strip().upper()
+    q = f'search=product_code:"{code}"+AND+event_date_initiated:{rng}&limit=100&skip={skip}'
+    return f"{FDA_DEVICE}?{q}"
+
+
+def _web_get(url: str) -> dict:
+    """Fetch openFDA. Returns a verdict dict; never HIT on transport failure."""
+    try:
+        res = gl.nondet.web.get(url)
+    except Exception:
+        return {
+            "kind": "INSUFFICIENT",
+            "classification": "",
+            "matched_id": "",
+            "reason": "web get failed",
+            "match_date": "",
+            "recall_id": "",
+        }
+    if hasattr(res, "get") and not hasattr(res, "status"):
+        blob = res
+        if isinstance(blob, dict) and "ok" in blob and isinstance(blob["ok"], dict):
+            blob = blob["ok"]
+        if isinstance(blob, dict) and "response" in blob:
+            blob = blob["response"]
+        status = int((blob or {}).get("status") or 0) if isinstance(blob, dict) else 0
+        body = (blob or {}).get("body", b"") if isinstance(blob, dict) else b""
+    else:
+        status = int(getattr(res, "status", 0) or 0)
+        body = getattr(res, "body", b"")
+    if isinstance(body, str):
+        raw = body.encode("utf-8", errors="replace")
+        text = body
+    else:
+        raw = bytes(body or b"")
+        text = raw.decode("utf-8", errors="replace")
+    if status >= 500 or status == 0:
+        return {
+            "kind": "INSUFFICIENT",
+            "classification": "",
+            "matched_id": "",
+            "reason": f"http {status}",
+            "match_date": "",
+            "recall_id": "",
+        }
+    if status == 404:
+        try:
+            data = json.loads(text)
+            if isinstance(data, dict) and isinstance(data.get("error"), dict) and data["error"].get("code") == "NOT_FOUND":
+                return {
+                    "kind": "OK",
+                    "classification": "",
+                    "matched_id": "",
+                    "reason": "",
+                    "match_date": "",
+                    "recall_id": "",
+                    "results": [],
+                    "total": 0,
+                }
+        except Exception:
+            pass
+        return {
+            "kind": "INSUFFICIENT",
+            "classification": "",
+            "matched_id": "",
+            "reason": "http 404",
+            "match_date": "",
+            "recall_id": "",
+        }
+    if status >= 400:
+        return {
+            "kind": "INSUFFICIENT",
+            "classification": "",
+            "matched_id": "",
+            "reason": f"http {status}",
+            "match_date": "",
+            "recall_id": "",
+        }
+    if len(raw) > MAX_BODY:
+        return {
+            "kind": "INSUFFICIENT",
+            "classification": "",
+            "matched_id": "",
+            "reason": "oversize",
+            "match_date": "",
+            "recall_id": "",
+        }
+    try:
+        data = json.loads(text)
+    except Exception:
+        return {
+            "kind": "INSUFFICIENT",
+            "classification": "",
+            "matched_id": "",
+            "reason": "non-json",
+            "match_date": "",
+            "recall_id": "",
+        }
+    if not isinstance(data, dict):
+        return {
+            "kind": "INSUFFICIENT",
+            "classification": "",
+            "matched_id": "",
+            "reason": "non-json",
+            "match_date": "",
+            "recall_id": "",
+        }
+    meta = data.get("meta")
+    results = data.get("results")
+    if not isinstance(meta, dict) or "results" not in meta:
+        return {
+            "kind": "INSUFFICIENT",
+            "classification": "",
+            "matched_id": "",
+            "reason": "missing meta.results",
+            "match_date": "",
+            "recall_id": "",
+        }
+    
+    meta_res = meta["results"]
+    if not isinstance(meta_res, dict):
+        return {
+            "kind": "INSUFFICIENT",
+            "classification": "",
+            "matched_id": "",
+            "reason": "malformed meta.results",
+            "match_date": "",
+            "recall_id": "",
+        }
+    
+    if "total" not in meta_res:
+        return {
+            "kind": "INSUFFICIENT",
+            "classification": "",
+            "matched_id": "",
+            "reason": "missing meta.results.total",
+            "match_date": "",
+            "recall_id": "",
+        }
+
+    try:
+        total = int(meta_res["total"])
+        skip_val = int(meta_res.get("skip", 0))
+        limit_val = int(meta_res.get("limit", MAX_RESULTS))
+        if total < 0 or skip_val < 0 or limit_val < 0:
+            raise ValueError
+    except (ValueError, TypeError):
+        return {
+            "kind": "INSUFFICIENT",
+            "classification": "",
+            "matched_id": "",
+            "reason": "malformed pagination",
+            "match_date": "",
+            "recall_id": "",
+        }
+
+    if not isinstance(results, list):
+        return {
+            "kind": "INSUFFICIENT",
+            "classification": "",
+            "matched_id": "",
+            "reason": "missing results[]",
+            "match_date": "",
+            "recall_id": "",
+        }
+        
+    for item in results:
+        if not isinstance(item, dict):
+            return {
+                "kind": "INSUFFICIENT",
+                "classification": "",
+                "matched_id": "",
+                "reason": "malformed item in results",
+                "match_date": "",
+                "recall_id": "",
+            }
+
+    return {
+        "kind": "OK",
+        "classification": "",
+        "matched_id": "",
+        "reason": "",
+        "match_date": "",
+        "recall_id": "",
+        "results": results[:MAX_RESULTS],
+        "total": total,
+        "skip": skip_val,
+        "limit": limit_val,
+    }
+
+
+def _scan(
+    template: str,
+    product_key: str,
+    start: datetime,
+    end: datetime,
+    rows: list,
+    allow_llm: bool,
+) -> dict:
+    # Earlier rows first. Rank 1 (Class I) beats 2 beats 3.
+    best_rank = 99
+    best: dict | None = None
+    matched_id = ""
+    tie_row = None
+    for row in rows[:MAX_RESULTS]:
+        ok, mid = _identity_match(template, product_key, row)
+        if not ok:
+            if allow_llm and _punctuation_tie(template, product_key, row) and tie_row is None:
+                tie_row = row
+            continue
+        if not _row_in_window(row, start, end):
+            continue
+        rank = _class_rank(str(row.get("classification", "")))
+        if rank == 0:
+            continue
+        if rank < best_rank:
+            best_rank = rank
+            best = row
+            matched_id = mid
+
+    if best is None and allow_llm and tie_row is not None:
+        llm = _llm_tie(product_key, tie_row)
+        if llm:
+            rank = _class_rank(str(tie_row.get("classification", "")))
+            if rank in (1, 2, 3) and _row_in_window(tie_row, start, end):
+                best = tie_row
+                best_rank = rank
+                matched_id = product_key
+
+    if best is None:
+        return {
+            "kind": "NOHIT",
+            "classification": "",
+            "matched_id": "",
+            "reason": "",
+            "match_date": "",
+            "recall_id": "",
+        }
+    dates = _row_dates(best)
+    md = _fda_day(dates[0]) if dates else ""
+    if best_rank == 1:
+        kind = "HIT"
+    elif best_rank == 2:
+        kind = "HIT"
+    else:
+        kind = "NOHIT"
+    return {
+        "kind": kind,
+        "classification": _class_label(best_rank),
+        "matched_id": matched_id,
+        "reason": _row_reason(best),
+        "match_date": md,
+        "recall_id": _row_recall_id(best),
+    }
+
+
+def _llm_tie(product_key: str, row: dict) -> bool:
+    snippet = json.dumps(
+        {
+            "brand_name": row.get("brand_name"),
+            "generic_name": row.get("generic_name"),
+            "openfda": row.get("openfda"),
+            "classification": row.get("classification"),
+        },
+        default=str,
+    )[:800]
+    prompt = (
+        "Punctuation-only identity tie for one FDA recall row. "
+        "product_key is brand|generic. Decide if the row is the same product "
+        "ignoring punctuation and case. "
+        f"product_key={product_key}\n"
+        f"row={snippet}\n"
+        'Return JSON {"match": true|false} only.'
+    )
+    try:
+        out = gl.nondet.exec_prompt(prompt, response_format="json")
+    except Exception:
+        return False
+    if isinstance(out, str):
+        try:
+            out = json.loads(out)
+        except Exception:
+            return False
+    if not isinstance(out, dict):
+        return False
+    v = out.get("match")
+    return v is True or str(v).lower() == "true"
+
+
+def _verdict_eq(a: dict, b: dict) -> bool:
+    return (
+        str(a.get("kind")) == str(b.get("kind"))
+        and str(a.get("classification")) == str(b.get("classification"))
+        and str(a.get("matched_id")) == str(b.get("matched_id"))
+    )
+
+
+class Recalline(gl.contract.Contract):
+    covers: TreeMap[str, Cover]
+    ids: DynArray[str]
+    credits: TreeMap[str, u256]
+    pool_deposited: u256
+    pool_reserved: u256
+    open_premiums: u256
+    credits_outstanding: u256
+    treasury: u256
+    buy_seq: u256
+
+    def __init__(self):
+        self.pool_deposited = u256(0)
+        self.pool_reserved = u256(0)
+        self.open_premiums = u256(0)
+        self.credits_outstanding = u256(0)
+        self.treasury = u256(PROTOCOL_FEE)
+        self.buy_seq = u256(0)
+
+    def _available(self) -> u256:
+        if self.pool_deposited < self.pool_reserved:
+            return u256(0)
+        return self.pool_deposited - self.pool_reserved
+
+    def _credit(self, addr: Address, amount: u256) -> None:
+        if amount == u256(0):
+            return
+        key = _addr_str(addr)
+        cur = self.credits[key] if key in self.credits else u256(0)
+        self.credits[key] = cur + amount
+        self.credits_outstanding = self.credits_outstanding + amount
+
+    def _pay(self, addr: Address, amount: u256, *, credit_on_fail: bool) -> None:
+        if amount == u256(0):
+            return
+        # Studio Next: in-execution EOA emit_transfer is attached to the
+        # proposal; the validator set is empty and the tx is CANCELED
+        # (max_generic_retries_exceeded). That is not a Python exception, so
+        # the old try/except never ran. Credit here; withdraw() still pays.
+        if credit_on_fail:
+            self._credit(addr, amount)
+            return
+        try:
+            getter = getattr(gl, "get_contract_at", None) or gl.contract.get_at
+            getter(addr).emit_transfer(value=amount)
+        except Exception:
+            _ue("transfer failed")
+
+    def _make_id(
+        self,
+        template: str,
+        product_key: str,
+        window_start_utc: str,
+        window_end_utc: str,
+        value: u256,
+        seq: u256,
+    ) -> str:
+        origin = _addr_str(gl.message.origin_address)
+        sender = _addr_str(gl.message.sender_address)
+        raw = _msg_raw()
+        dt = str(raw["datetime"]) if raw.get("datetime") else _iso(_now())
+        raw = "|".join(
+            [
+                origin,
+                sender,
+                dt,
+                str(int(value)),
+                template,
+                product_key,
+                window_start_utc,
+                window_end_utc,
+                str(int(seq)),
+            ]
+        )
+        return "0x" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+    def _fetch_verdict(
+        self,
+        template: str,
+        product_key: str,
+        start: datetime,
+        end: datetime,
+        allow_llm: bool,
+    ) -> dict:
+        def leader_fn() -> dict:
+            skip = 0
+            limit = 100
+            best_scanned = None
+            while skip < 1000:
+                url = _build_url(template, product_key, start, end, skip)
+                fetched = _web_get(url)
+                if fetched.get("kind") != "OK":
+                    return {
+                        "kind": "INSUFFICIENT",
+                        "classification": "",
+                        "matched_id": "",
+                        "reason": fetched.get("reason", "insufficient"),
+                        "match_date": "",
+                        "recall_id": "",
+                        "query_url": url,
+                    }
+                
+                res = fetched.get("results") or []
+                total = fetched.get("total", 0)
+                scanned = _scan(template, product_key, start, end, res, allow_llm)
+                scanned["query_url"] = url
+                
+                if best_scanned is None:
+                    best_scanned = scanned
+                else:
+                    br1 = _class_rank(best_scanned.get("classification", ""))
+                    br2 = _class_rank(scanned.get("classification", ""))
+                    if br2 != 0:
+                        if br1 == 0 or br2 < br1:
+                            best_scanned = scanned
+                
+                if fetched.get("skip", 0) != skip:
+                    return {
+                        "kind": "INSUFFICIENT",
+                        "classification": "",
+                        "matched_id": "",
+                        "reason": "skip mismatch",
+                        "match_date": "",
+                        "recall_id": "",
+                        "query_url": _build_url(template, product_key, start, end, 0),
+                    }
+                
+                fetched_limit = fetched.get("limit", limit)
+                
+                if len(res) == 0:
+                    if skip < total:
+                        return {
+                            "kind": "INSUFFICIENT",
+                            "classification": "",
+                            "matched_id": "",
+                            "reason": "incomplete pagination",
+                            "match_date": "",
+                            "recall_id": "",
+                            "query_url": _build_url(template, product_key, start, end, 0),
+                        }
+                    break
+
+                skip += len(res)
+                
+                if skip < total and len(res) < fetched_limit:
+                    return {
+                        "kind": "INSUFFICIENT",
+                        "classification": "",
+                        "matched_id": "",
+                        "reason": "short page",
+                        "match_date": "",
+                        "recall_id": "",
+                        "query_url": _build_url(template, product_key, start, end, 0),
+                    }
+                
+                if skip >= total:
+                    break
+
+            if skip >= 1000 and len(res) == limit:
+                return {
+                    "kind": "INSUFFICIENT",
+                    "classification": "",
+                    "matched_id": "",
+                    "reason": "safety cap reached",
+                    "match_date": "",
+                    "recall_id": "",
+                    "query_url": _build_url(template, product_key, start, end, 0),
+                }
+
+            if best_scanned is None:
+                return {
+                    "kind": "INSUFFICIENT",
+                    "classification": "",
+                    "matched_id": "",
+                    "reason": "no data",
+                    "match_date": "",
+                    "recall_id": "",
+                    "query_url": _build_url(template, product_key, start, end, 0),
+                }
+            return best_scanned
+
+        def validator_fn(leaders_res: gl.vm.Result) -> bool:
+            if not isinstance(leaders_res, gl.vm.Return):
+                try:
+                    leader_fn()
+                    return False
+                except Exception:
+                    return True
+            other = leader_fn()
+            lead = leaders_res.calldata
+            if not isinstance(lead, dict):
+                return False
+            return _verdict_eq(lead, other)
+
+        run = (
+            getattr(gl.vm, "run_nondet_default", None)
+            or getattr(gl.vm, "run_nondet", None)
+            or getattr(gl.vm, "run_nondet_unsafe", None)
+        )
+        if run is None:
+            _ue("nondet unavailable")
+        out = run(leader_fn, validator_fn)
+        if not isinstance(out, dict):
+            return {
+                "kind": "INSUFFICIENT",
+                "classification": "",
+                "matched_id": "",
+                "reason": "bad verdict",
+                "match_date": "",
+                "recall_id": "",
+                "query_url": _build_url(template, product_key, start, end, 0),
+            }
+        out["query_url"] = _build_url(template, product_key, start, end, 0)
+        return out
+
+    @gl.public.write.payable
+    def fund_pool(self) -> None:
+        v = gl.message.value
+        if v == u256(0):
+            _ue("value > 0")
+        self.pool_deposited = self.pool_deposited + v
+
+    @gl.public.write.payable
+    def buy_cover(
+        self,
+        template: str,
+        product_key: str,
+        window_start_utc: str,
+        window_end_utc: str,
+    ) -> str:
+        premium = gl.message.value
+        if premium == u256(0):
+            _ue("premium > 0")
+        tpl = (template or "").strip().upper()
+        if tpl not in TEMPLATES:
+            _ue("unknown template")
+        key = _norm_space(product_key)
+        _validate_key(tpl, key)
+        start = _parse_utc(window_start_utc)
+        end = _parse_utc(window_end_utc)
+        if end <= start:
+            _ue("window_end > window_start")
+        length = end - start
+        if length < timedelta(days=WINDOW_MIN_DAYS) or length > timedelta(days=WINDOW_MAX_DAYS):
+            _ue("window length 1..14 days")
+        now = _now()
+        if now > start - timedelta(hours=LEAD_HOURS):
+            _ue("buy before window_start - 24h")
+        reserve = premium * u256(RESERVE_MULT)
+        if self._available() < reserve:
+            _ue("pool_available < reserve")
+
+        look_end = now
+        look_start = now - timedelta(days=LOOKBACK_DAYS)
+        look = self._fetch_verdict(tpl, key, look_start, look_end, False)
+        if look.get("kind") == "INSUFFICIENT":
+            _ue("lookback insufficient evidence")
+        if look.get("kind") == "HIT" and _class_rank(str(look.get("classification", ""))) in (1, 2):
+            _ue("lookback Class I/II")
+
+        seq = self.buy_seq + u256(1)
+        self.buy_seq = seq
+        cid = self._make_id(tpl, key, _iso(start), _iso(end), premium, seq)
+        if cid in self.covers:
+            _ue("id collision")
+        expire_at = end + timedelta(days=EXPIRE_GRACE_DAYS)
+        cover = Cover(
+            cover_id=cid,
+            buyer=gl.message.sender_address,
+            template=tpl,
+            product_key=key,
+            window_start_utc=_iso(start),
+            window_end_utc=_iso(end),
+            expire_at_utc=_iso(expire_at),
+            premium=premium,
+            reserve=reserve,
+            status=ST_OPEN,
+            created_at=_iso(now),
+            query_url=_build_url(tpl, key, start, end, 0),
+            classification="",
+            matched_id="",
+            match_reason="",
+            match_date="",
+            payout=u256(0),
+            refund=u256(0),
+        )
+        self.covers[cid] = cover
+        self.ids.append(cid)
+        self.pool_reserved = self.pool_reserved + reserve
+        self.open_premiums = self.open_premiums + premium
+        return cid
+
+    def _get(self, cover_id: str) -> Cover:
+        if cover_id not in self.covers:
+            _ue("unknown cover")
+        return self.covers[cover_id]
+
+    @gl.public.write
+    def cancel(self, id: str) -> None:
+        c = self._get(id)
+        if gl.message.sender_address != c.buyer:
+            _ue("buyer only")
+        if c.status != ST_OPEN:
+            _ue("OPEN only")
+        if _now() >= _parse_utc(c.window_start_utc):
+            _ue("now < window_start")
+        premium = c.premium
+        reserve = c.reserve
+        c.status = ST_CANCELED
+        c.refund = premium
+        self.covers[id] = c
+        self.pool_reserved = self.pool_reserved - reserve
+        self.open_premiums = self.open_premiums - premium
+        self._pay(c.buyer, premium, credit_on_fail=True)
+
+    @gl.public.write
+    def settle(self, id: str) -> None:
+        c = self._get(id)
+        if c.status != ST_OPEN:
+            _ue("OPEN only")
+        now = _now()
+        end = _parse_utc(c.window_end_utc)
+        exp = _parse_utc(c.expire_at_utc)
+        if now < end:
+            _ue("now >= window_end")
+        if now >= exp:
+            _ue("now < expire_at")
+        start = _parse_utc(c.window_start_utc)
+        v = self._fetch_verdict(c.template, c.product_key, start, end, c.template == T_DRUG_NAME)
+        kind = str(v.get("kind") or ST_INSUFFICIENT)
+        c.query_url = str(v.get("query_url") or c.query_url)
+        c.classification = str(v.get("classification") or "")
+        c.matched_id = str(v.get("matched_id") or "")
+        c.match_reason = str(v.get("reason") or "")
+        c.match_date = str(v.get("match_date") or "")
+        premium = c.premium
+        reserve = c.reserve
+        self.pool_reserved = self.pool_reserved - reserve
+        self.open_premiums = self.open_premiums - premium
+
+        if kind == ST_INSUFFICIENT:
+            c.status = ST_INSUFFICIENT
+            c.refund = premium
+            self.covers[id] = c
+            self._pay(c.buyer, premium, credit_on_fail=True)
+            return
+
+        rank = _class_rank(c.classification)
+        if kind == ST_HIT and rank == 1:
+            payout = premium * u256(HIT_I_MULT)
+            # 3x = premium + 2x reserve; pool capital decreases by 2x
+            if self.pool_deposited < reserve:
+                _ue("pool insolvent")
+            self.pool_deposited = self.pool_deposited - reserve
+            c.status = ST_HIT
+            c.payout = payout
+            self.covers[id] = c
+            self._pay(c.buyer, payout, credit_on_fail=True)
+            return
+        if kind == ST_HIT and rank == 2:
+            payout = premium * u256(HIT_II_MULT)
+            extra = premium  # 1x from pool
+            if self.pool_deposited < extra:
+                _ue("pool insolvent")
+            self.pool_deposited = self.pool_deposited - extra
+            c.status = ST_HIT
+            c.payout = payout
+            self.covers[id] = c
+            self._pay(c.buyer, payout, credit_on_fail=True)
+            return
+
+        # NOHIT (including Class III only): premium stays in pool
+        c.status = ST_NOHIT
+        self.pool_deposited = self.pool_deposited + premium
+        self.covers[id] = c
+
+    @gl.public.write
+    def expire(self, id: str) -> None:
+        c = self._get(id)
+        if c.status != ST_OPEN:
+            _ue("OPEN only")
+        if _now() < _parse_utc(c.expire_at_utc):
+            _ue("now >= expire_at")
+        premium = c.premium
+        reserve = c.reserve
+        c.status = ST_EXPIRED
+        c.refund = premium
+        self.covers[id] = c
+        self.pool_reserved = self.pool_reserved - reserve
+        self.open_premiums = self.open_premiums - premium
+        self._pay(c.buyer, premium, credit_on_fail=True)
+
+    @gl.public.write
+    def withdraw(self) -> None:
+        key = _addr_str(gl.message.sender_address)
+        if key not in self.credits:
+            _ue("no credit")
+        amount = self.credits[key]
+        if amount == u256(0):
+            _ue("no credit")
+        getter = getattr(gl, "get_contract_at", None) or gl.contract.get_at
+        getter(gl.message.sender_address).emit_transfer(value=amount)
+        self.credits[key] = u256(0)
+        if self.credits_outstanding >= amount:
+            self.credits_outstanding = self.credits_outstanding - amount
+        else:
+            self.credits_outstanding = u256(0)
+
+    def _cover_dict(self, c: Cover) -> dict:
+        return {
+            "id": c.cover_id,
+            "buyer": _addr_str(c.buyer),
+            "template": c.template,
+            "product_key": c.product_key,
+            "window_start_utc": c.window_start_utc,
+            "window_end_utc": c.window_end_utc,
+            "expire_at_utc": c.expire_at_utc,
+            "premium": int(c.premium),
+            "reserve": int(c.reserve),
+            "status": c.status,
+            "created_at": c.created_at,
+            "query_url": c.query_url,
+            "classification": c.classification,
+            "matched_id": c.matched_id,
+            "match_reason": c.match_reason,
+            "match_date": c.match_date,
+            "payout": int(c.payout),
+            "refund": int(c.refund),
+            "hit_i_mult": HIT_I_MULT,
+            "hit_ii_mult": HIT_II_MULT,
+        }
+
+    @gl.public.view
+    def get_cover(self, id: str) -> dict:
+        if id not in self.covers:
+            _ue("unknown cover")
+        return self._cover_dict(self.covers[id])
+
+    @gl.public.view
+    def list_ids(self) -> list:
+        return [str(x) for x in self.ids]
+
+    @gl.public.view
+    def get_cover_ids(self) -> list:
+        return [str(x) for x in self.ids]
+
+    @gl.public.view
+    def get_economics(self) -> dict:
+        return {
+            "pool_deposited": int(self.pool_deposited),
+            "pool_reserved": int(self.pool_reserved),
+            "pool_available": int(self._available()),
+            "open_premiums": int(self.open_premiums),
+            "credits_outstanding": int(self.credits_outstanding),
+            "treasury": int(self.treasury),
+        }
+
+    @gl.public.view
+    def get_credit(self, addr: str) -> int:
+        key = addr.strip()
+        if key not in self.credits:
+            return 0
+        return int(self.credits[key])
+

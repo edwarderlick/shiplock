@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "network": "studio_devnet",
+  "measuredAt": "2026-09-17T12:10:00Z",
+  "chainId": 61997,
+  "source": "studio-dev estimateTransactionFees plus headroom for web/LLM branches; direct-mode receipts expose no consumed fees",
+  "deploy": {
+    "leaderTimeunitsAllocation": "125",
+    "validatorTimeunitsAllocation": "250",
+    "executionBudgetPerRound": "25000000000000000",
+    "totalMessageFees": "0",
+    "rotationsPerRound": "1"
+  },
+  "methods": {
+    "fund_pool": {
+      "leaderTimeunitsAllocation": "125",
+      "validatorTimeunitsAllocation": "250",
+      "executionBudgetPerRound": "25000000000000000",
+      "totalMessageFees": "0",
+      "rotationsPerRound": "1"
+    },
+    "buy_cover": {
+      "leaderTimeunitsAllocation": "250",
+      "validatorTimeunitsAllocation": "500",
+      "executionBudgetPerRound": "25000000000000000",
+      "totalMessageFees": "10000000000000000",
+      "rotationsPerRound": "1"
+    },
+    "cancel": {
+      "leaderTimeunitsAllocation": "125",
+      "validatorTimeunitsAllocation": "250",
+      "executionBudgetPerRound": "25000000000000000",
+      "totalMessageFees": "1000000000000000",
+      "rotationsPerRound": "1"
+    },
+    "settle": {
+      "leaderTimeunitsAllocation": "400",
+      "validatorTimeunitsAllocation": "800",
+      "executionBudgetPerRound": "25000000000000000",
+      "totalMessageFees": "20000000000000000",
+      "rotationsPerRound": "1"
+    },
+    "expire": {
+      "leaderTimeunitsAllocation": "125",
+      "validatorTimeunitsAllocation": "250",
+      "executionBudgetPerRound": "25000000000000000",
+      "totalMessageFees": "1000000000000000",
+      "rotationsPerRound": "1"
+    },
+    "withdraw": {
+      "leaderTimeunitsAllocation": "125",
+      "validatorTimeunitsAllocation": "250",
+      "executionBudgetPerRound": "25000000000000000",
+      "totalMessageFees": "1000000000000000",
+      "rotationsPerRound": "1"
+    }
+  }
+}

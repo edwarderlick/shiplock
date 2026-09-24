@@ -1,0 +1,421 @@
+Title: Live Content
+Description: Fetched live
+Source: https://docs.genlayer.com/developers/consensus-v06-migration
+---
+Consensus v0.6 Migration | GenLayer Documentation
+Skills 🤖
+Skills 🤖
+ (opens in a new tab)
+Blog 📚
+Blog 📚
+ (opens in a new tab)
+Bulk Download 🤖
+Bulk Download 🤖
+ (opens in a new tab)
+Copy page
+Welcome to GenLayer
+Discover the Protocol
+What is GenLayer
+How GenLayer Works
+Use Cases
+Core Concepts
+GenLayer Chain Integration
+Accounts and Addresses
+GenVM
+Non-deterministic Operations
+LLM Integration
+Web Data Access
+Validators and Roles
+Optimistic Democracy
+Equivalence Principle
+Appeals
+Deterministic Violations &amp; Tribunals
+Protocol Randomness
+Finality
+Staking
+Slashing
+Unstaking
+Transactions
+Transaction Types
+Transaction Execution
+Transaction Statuses
+Encoding and Signing
+Economic Model
+Build on GenLayer
+Networks &amp; RPCs
+Consensus v0.6 Migration
+Intelligent Contracts
+Introduction to Intelligent Contracts
+When to Use GenLayer
+Feature List
+Storage Reference
+Error Handling
+Upgradability
+Value Transfers
+Transaction Context
+Messages
+Interacting with Intelligent Contracts
+Interacting with EVM Contracts
+Special Methods
+Vector Storage
+Debugging Code
+Random
+Non-determinism
+Calling LLMs
+Image Processing
+Web Access
+Balances
+Development Setup
+Your First Contract
+Types
+Address Type
+Primitive Types
+Collection Types
+Dataclasses
+Contract Storage
+Your First Intelligent Contract
+Equivalence Principle
+Debugging in Studio
+Testing
+Deploying
+Deployment Methods
+Network Configuration
+CLI Deployment
+Deploy Scripts
+Prompt &amp; Data Techniques
+Security and Best Practices
+Prompt Injection
+Examples
+Storage
+User Storage
+LLM Hello World
+LLM Hello World Non-Comparative
+Wizard of Coin
+Fetch Web Content
+Fetch Github Profile
+Github Profile Projects
+Github Profile Summary
+Football Prediction Market
+Vector Store Log Indexer
+Tools
+GenLayer CLI
+GenLayer Studio
+Loading a Contract
+Deploying a Contract
+Reading the Contract State
+Executing a Transaction
+Monitoring Node Logs
+Validators
+Providers
+Limitations
+Reset the Studio
+Troubleshooting
+Development Tips
+Advanced Features
+Adding Custom LLM Providers
+Ideas
+Frontend &amp; SDK Integration
+Architecture Overview
+DApp Development Workflow
+GenLayer JS
+Querying a Transaction
+Reading Data from Intelligent Contracts
+Writing Data to Intelligent Contracts
+Fees &amp; Transaction Policy
+Transaction Kit Integration
+Fee Profiling &amp; Estimation
+Fee Outcomes &amp; Debugging
+Developer NFT Rewards
+Testing in Studio
+Project Boilerplate
+Error &amp; Revert Reference
+Staking Contract Guide
+Run a Validator
+Setup Guide
+Monitoring &amp; Telemetry
+Network Keeper Roles
+System Requirements
+GenVM Configuration
+Upgrade Guide
+Changelog
+API References
+GenLayer CLI
+Overview
+Environment
+init
+up
+stop
+new
+update
+update ollama
+Contracts
+deploy
+call
+write
+schema
+code
+Transactions
+receipt
+trace
+appeal
+appeal-bond
+Configuration
+config
+config get
+config reset
+config set
+network
+network info
+network list
+network set
+Accounts
+account
+account create
+account export
+account import
+account list
+account lock
+account remove
+account send
+account show
+account unlock
+account use
+Staking
+staking
+staking active-validators
+staking banned-validators
+staking delegation-info
+staking delegator-claim
+staking delegator-exit
+staking delegator-join
+staking epoch-info
+staking prime-all
+staking quarantined-validators
+staking set-identity
+staking set-operator
+staking validator-claim
+staking validator-deposit
+staking validator-exit
+staking validator-history
+staking validator-info
+staking validator-join
+staking validator-prime
+staking validators
+staking wizard
+Localnet
+localnet
+localnet validators
+localnet validators count
+localnet validators create
+localnet validators create-random
+localnet validators delete
+localnet validators get
+localnet validators update
+finalize
+finalize-batch
+GenLayerJS
+Contracts
+Transactions
+Staking
+GenLayerPY
+API Reference
+GenLayer Test
+Integration Testing
+Direct Mode
+glsim
+GenLayer Node API
+GenLayer Methods
+gen_call
+gen_getContractSchema
+gen_getContractState
+gen_getContractCode
+gen_getTransactionReceipt
+gen_getTransactionStatus
+gen_getTransactionLifecycle
+gen_syncing
+Debug Methods
+gen_dbg_ping
+gen_dbg_trie
+gen_dbg_traceTransaction
+Ops Methods
+balance
+health
+metrics
+snapshot
+GenVM Linter
+GenVM SDK ↗
+ (opens in a new tab)
+Partners
+GenLayer Labs
+Heurist
+io.net
+Comput3
+Chutes
+LibertAI
+Morpheus
+FAQ
+Light
+On This Page
+Compatible release lines
+Test on Studio-dev first
+Migrate fee submission
+Migrate appeals
+Read status and execution together
+Other protocol-visible changes
+Application checklist
+Question? Give us feedback →
+ (opens in a new tab)
+Edit this page
+Build on GenLayer
+Consensus v0.6 Migration
+Consensus v0.6 Migration
+Consensus v0.6 introduces the complete fee-funded transaction lifecycle used by Studio v0.123. Applications should upgrade Studio, node, SDK, CLI, and fee-profile tooling as one compatible release family rather than mixing release-candidate and stable components.
+Compatible release lines
+Component
+v0.6 release family
+Consensus contracts and GenLayer Node
+v0.6 RC
+GenLayer Studio
+v0.123 RC
+genlayer-js
+v2.0 RC
+genlayer-py
+v0.19 RC
+GenLayer CLI
+v0.40 RC
+Transaction Kit and 
+gltest
+ fee profiles
+matching v0.6-compatible prerelease
+Use the exact versions published in the release notes. Prerelease package tags must be installed explicitly; do not assume an npm or container 
+latest
+ tag resolves to the RC.
+Test on Studio-dev first
+The release-candidate stack is deployed at 
+studio-dev.genlayer.com
+ (opens in a new tab)
+, with canonical RPC 
+https://studio-dev.genlayer.com/api
+ and chain ID 
+61997
+. It is separate from stable Studionet (
+61999
+).
+Use the JavaScript 
+studioDevnet
+ definition or CLI 
+studio-dev
+ alias supplied by the matching RC. Do not point the stable 
+studionet
+ chain object at the preview RPC: chain identity and consensus contract addresses must move together.
+Migrate fee submission
+On a fee-charging deployment, every deploy and write must carry a 
+FeesDistribution
+ and its quoted fee value. The recommended path is:
+exercise representative contract branches in tests;
+generate and commit a 
+fee-profile.json
+ with 
+gltest --fee-profile
+;
+convert the selected profile entry into live estimate options;
+read current network prices and caps through the SDK estimate; and
+submit the returned 
+distribution
+ and 
+feeValue
+ unchanged.
+The deposit covers consensus time units, execution, child messages, and the chosen appeal/rotation posture. Unused fee budget is refunded at finalization. A Studio deployment can be gasless; detect that from the estimate result rather than from its network name.
+See 
+Fees &amp; Transaction Policy
+ and 
+Fee Profiling &amp; Estimation
+.
+Migrate appeals
+The authoritative appeal quote contains both the bond and funding for the work induced by the next round. Use the high-level appeal operation and let it bind the active decision:
+const
+charge
+=
+await
+client
+.getAppealCharge
+({ txId });
+await
+client
+.appealTransaction
+({ txId
+,
+ value
+:
+ charge });
+charge 
+=
+ client
+.
+get_appeal_charge
+(tx_id)
+client
+.
+appeal_transaction
+(tx_id, value
+=
+charge)
+Both public operations use 
+topUpAndSubmitAppeal
+. Direct 
+submitAppeal
+ is only suitable for explicit low-level conformance against a next round that is already funded; an ordinary unfunded appeal can otherwise revert with 
+AppealRoundNotPermitted
+.
+A successful appeal returns the bond principal plus profit equal to 1.5× the bond, for 2.5× the bond in total. The induced-work funding is not part of the multiplied reward.
+Read status and execution together
+An accepted or finalized status does not by itself prove successful contract execution. Treat a transaction as successful only when:
+its status is 
+ACCEPTED
+ or 
+FINALIZED
+; and
+its execution result is 
+FINISHED_WITH_RETURN
+.
+Use the SDK&#x27;s 
+isSuccessful
+ helper or Transaction Kit&#x27;s normalized outcome. Track until finalization when the UI needs exact fee consumption and refunds.
+Other protocol-visible changes
+Randomness:
+ validator seed advances use ECVRF proofs bound to the registered operator public key and a per-recipient domain-separated seed chain.
+Tribunals:
+ the electorate and quorum are frozen at creation, consequence processing is bounded and retryable, and a majority-disagree verdict wires the convicted leader into the staking judicial restriction.
+Developer rewards:
+ the first deployment mints one Developer NFT, and later contracts from the same developer are attached to it. One claim processes at most 50 inflation epochs.
+Error decoding:
+ the v0.6 snapshot exposes 363 unique custom-error selectors; use the 
+Error &amp; Revert Reference
+ with the ABI from the deployment you are calling.
+Application checklist
+Install one coherent RC set and lock it in the package and deployment manifests.
+Use 
+studioDevnet
+ / 
+studio-dev
+ for the preview and 
+studionet
+ only for stable Studio.
+Replace hand-built fee arithmetic with an SDK estimate generated from a measured profile.
+Cover every message-emitting and materially expensive branch in profile tests.
+Replace direct public 
+submitAppeal
+ calls with 
+appealTransaction
+ / 
+appeal_transaction
+.
+Display deposit, consumed fees, and final refund as different values.
+Require both successful status and execution result before showing an application action as complete.
+Re-run profile tests whenever contract code, GenVM, Studio, or the fee policy changes.
+⚠️
+Studio-dev is a release-candidate environment and may reset. Move durable production-like testing to Bradbury only after the compatible v0.6 stack has been promoted there.
+Networks &amp; RPCs
+Introduction to Intelligent Contracts
+Light
+GenLayer Documentation

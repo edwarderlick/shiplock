@@ -18,7 +18,7 @@ class _Recipient:
     class View:
         pass
     class Write:
-        pass
+        def emit_transfer(self, value: u256, /) -> None: ...
 
 @allow_storage
 @dataclass
@@ -177,7 +177,6 @@ class ShipLock(gl.contract.Contract):
     escrows: TreeMap[str, Escrow]
     ids: DynArray[str]
     credits: TreeMap[str, u256]
-    buy_seq: u256
     
     escrowed_open: u256
     paid_to_recipients: u256
@@ -186,8 +185,6 @@ class ShipLock(gl.contract.Contract):
     treasury: u256
 
     def __init__(self):
-        self.buy_seq = u256(0)
-        
         self.escrowed_open = u256(0)
         self.paid_to_recipients = u256(0)
         self.refunded_to_funders = u256(0)
@@ -269,11 +266,8 @@ class ShipLock(gl.contract.Contract):
                 raise gl.vm.UserError("already yanked")
             raise gl.vm.UserError("already published")
             
-        seq = self.buy_seq + u256(1)
-        self.buy_seq = seq
-        
-        raw_hash = f"{funder}|{recipient}|{template}|{pkg}|{ver}|{_iso(start_dt)}|{int(amount)}|{int(seq)}".encode("utf-8")
-        id_hash = "0x" + hashlib.sha256(raw_hash).hexdigest()
+        raw = f"{funder}|{payee}|{template}|{pkg}|{ver}|{_iso(start_dt)}|{int(amount)}|{_msg_raw().get('datetime','')}|{id(gl)}".encode()
+        id_hash = "0x" + hashlib.sha256(raw).hexdigest()
         
         if id_hash in self.escrows:
             raise gl.vm.UserError("id collision")
