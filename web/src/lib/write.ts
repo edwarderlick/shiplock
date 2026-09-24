@@ -106,7 +106,9 @@ export async function writeIc({
 
   let tx;
   try {
-    if (client.waitForFinalization) {
+    if ((client as any).waitForDecision) {
+      tx = await (client as any).waitForDecision({ hash: txId });
+    } else if (client.waitForFinalization) {
       tx = await client.waitForFinalization({ hash: txId });
     } else if (client.waitForTransactionReceipt) {
       tx = await client.waitForTransactionReceipt({
@@ -124,7 +126,7 @@ export async function writeIc({
         try {
           tx = await client.getTransaction({ hash: txId });
           const status = tx?.statusName || tx?.status;
-          if (tx && status && status !== 'PENDING') {
+          if (tx && status && (status === 'ACCEPTED' || status === 'FINALIZED' || status === 5 || status === 7)) {
             break;
           }
         } catch (e: any) {
@@ -137,8 +139,17 @@ export async function writeIc({
       }
     }
   } catch (e: any) {
-    onProgress?.("FAILED", { hash: txId, error: String(e) });
-    throw e;
+    try {
+      tx = await client.getTransaction({ hash: txId });
+      const status = tx?.statusName || tx?.status;
+      const exec = tx?.txExecutionResultName || tx?.executionResultName || tx?.result || tx?.execution_result;
+      if (!tx || (status !== 'ACCEPTED' && status !== 'FINALIZED' && status !== 5 && status !== 7) || !String(exec).includes("FINISHED_WITH_RETURN")) {
+        throw e;
+      }
+    } catch(fallbackErr) {
+      onProgress?.("FAILED", { hash: txId, error: String(e) });
+      throw e;
+    }
   }
 
   const txAny = tx as any;
