@@ -11,7 +11,7 @@ Same write. No docket. No appeal UI. No court.
 | | |
 |---|---|
 | GitHub | https://github.com/edwarderlick/shiplock |
-| Live app | *(add Vercel URL after deploy)* |
+| Live app | https://shiplock-chi.vercel.app/ |
 | Network | Studio Next / studio-dev |
 | Chain ID | 61997 (`0xF22D`) |
 | RPC | https://studio-dev.genlayer.com/api |
