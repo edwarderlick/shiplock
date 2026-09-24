@@ -6,11 +6,6 @@ import { WalletProvider } from "@/lib/wallet";
 export const metadata: Metadata = {
   title: "ShipLock",
   description: "Registry publication escrow on GenLayer Studio Next",
-  icons: {
-    icon: "/favicon-32.png",
-    shortcut: "/favicon.ico",
-    apple: "/apple-touch-icon.png",
-  },
 };
 
 export default function RootLayout({
