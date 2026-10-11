@@ -22,7 +22,7 @@ Same write. No docket. No appeal UI. No court.
 | Source Hash (SHA-256) | `be743c1a8277716d21018911352fe9d7ccd3dd30fb1b8d829d19384133401a0e` (Verified 100% parity) |
 | Tests | `python -m pytest` → **48 passed** (35 direct contract tests + 13 deployer keystore tests) |
 | Web Tests | `npm --prefix web test` → **69 passed** (15 suites) |
-| Evidence Tests | `node --test tests/test_evidence_harness.mjs` → **35 passed** (8 suites) |
+| Evidence Tests | `node --test tests/test_evidence_harness.mjs` → **41 passed** (9 suites) |
 | Live on-chain smoke | Verified on Studio Next: PyPI & npm 404 escrows, cancel/refund, candidate release escrows ([EVIDENCE.md](./EVIDENCE.md)) |
 | Steward Evidence | [EVIDENCE.md](./EVIDENCE.md) · [steward_evidence.json](./scripts/steward_evidence.json) |
 
@@ -115,10 +115,10 @@ python -m pytest
 # Frontend Runtime & Integration Flow (69 passed)
 npm --prefix web test
 
-# Fail-Closed Evidence Harness & Recovery Tests (35 passed)
+# Fail-Closed Evidence Harness & Recovery Tests (41 passed)
 node --test tests/test_evidence_harness.mjs
 ```
-Covered: deterministic hash IDs, concurrent distinct IDs, early 404 leaves OPEN & retryable then settles on later success, unexpected HTTP statuses (429/403/301/500) leave OPEN before and after window, fund lookback permits only verified absent, npm deprecated vs yanked, realistic large npm responses & oversize caps, now_dt explicit timestamp requirement, scoped npm packages, window-end refund boundary, in-window publication settling after window-end, PyPI multi-file earliest non-yanked selection, yanked release refunds funder, economics across all transitions, 24h & 14d gates, latest/url reject, funder≠recipient, funder cannot release, cancel before start, cancel after start reverts, release before window reverts, double release reverts, expire grace bounds, list_ids parity, withdraw ordering, end-to-end matching flow, two-recipient release allocation trees, and fail-closed handling of missing/malformed npm/PyPI metadata leaving escrows OPEN.
+Covered: deterministic hash IDs, concurrent distinct IDs, early 404 leaves OPEN & retryable then settles on later success, unexpected HTTP statuses (429/403/301/500) leave OPEN before and after window, fund lookback permits only verified absent, npm deprecated vs yanked, realistic large npm responses & oversize caps, now_dt explicit timestamp requirement, scoped npm packages, window-end refund boundary, in-window publication settling after window-end, PyPI multi-file earliest non-yanked selection, yanked release refunds funder, economics across all transitions, 24h & 14d gates, latest/url reject, funder≠recipient, funder cannot release, cancel before start, cancel after start reverts, release before window reverts, double release reverts, expire grace bounds, list_ids parity, withdraw ordering, end-to-end matching flow, two-recipient release allocation trees, emitted transfers & child transactions verification, pending child transfer restart reconciliation, Studio Next RPC time gate checks, and fail-closed handling of missing/malformed npm/PyPI metadata leaving escrows OPEN.
 Full matrix: [TESTCASES.md](./TESTCASES.md)
 
 ## Live smoke & steward evidence on Studio Next (Chain 61997)

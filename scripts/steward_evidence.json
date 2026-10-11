@@ -1,6 +1,6 @@
 {
   "contractAddress": "0x7Cef756668Cd925807e8B110D0330643c6F809E3",
-  "checkedAtUtc": "2026-10-11T11:38:54.856Z",
+  "checkedAtUtc": "2026-10-11T17:53:17.000Z",
   "escrows": [
     {
       "id": "0x1ac2eea7c83967a0abe667355598d3809fb2552cc5d4227ad7ba86fee09a3c46",
@@ -17,9 +17,9 @@
       "initialStatus": "OPEN",
       "initialMatchReason": "LOOKBACK_404_OK",
       "currentStatus": "OPEN_PENDING_WINDOW",
-      "timeRemainingHours": "22.91",
+      "timeRemainingHours": "16.67",
       "latestRegistryCheck": {
-        "timestampUtc": "2026-10-11T11:38:54.856Z",
+        "timestampUtc": "2026-10-11T17:53:17.000Z",
         "url": "https://pypi.org/pypi/shiplock-smoke-does-not-exist/0.0.0-smoke.1/json",
         "statusCode": 404,
         "exists": false,
@@ -47,9 +47,9 @@
       "initialStatus": "OPEN",
       "initialMatchReason": "LOOKBACK_404_OK",
       "currentStatus": "OPEN_PENDING_WINDOW",
-      "timeRemainingHours": "22.91",
+      "timeRemainingHours": "16.67",
       "latestRegistryCheck": {
-        "timestampUtc": "2026-10-11T11:38:54.856Z",
+        "timestampUtc": "2026-10-11T17:53:17.000Z",
         "url": "https://registry.npmjs.org/shiplock-smoke-does-not-exist-npm",
         "statusCode": 404,
         "exists": false,
@@ -82,7 +82,7 @@
       "matchReason": "LOOKBACK_404_OK",
       "createdAtUtc": "2026-10-11T10:11:59.640Z",
       "latestRegistryCheck": {
-        "timestampUtc": "2026-10-11T11:39:43.569Z",
+        "timestampUtc": "2026-10-11T17:53:33.000Z",
         "url": "https://pypi.org/pypi/shiplock-steward-release-live/1.0.0/json",
         "statusCode": 404,
         "exists": false,
@@ -92,7 +92,7 @@
         "summary": "Package or version not found (HTTP 404)"
       },
       "currentStatus": "OPEN_PENDING_WINDOW",
-      "timeRemainingHours": "24.52"
+      "timeRemainingHours": "18.29"
     },
     {
       "target": "npm",
@@ -112,7 +112,7 @@
       "matchReason": "LOOKBACK_404_OK",
       "createdAtUtc": "2026-10-11T10:12:42.443Z",
       "latestRegistryCheck": {
-        "timestampUtc": "2026-10-11T11:39:43.569Z",
+        "timestampUtc": "2026-10-11T17:53:33.000Z",
         "url": "https://registry.npmjs.org/shiplock-steward-release-live",
         "statusCode": 404,
         "exists": false,
@@ -122,7 +122,7 @@
         "summary": "Package not found on npm (HTTP 404)"
       },
       "currentStatus": "OPEN_PENDING_WINDOW",
-      "timeRemainingHours": "24.52"
+      "timeRemainingHours": "18.29"
     }
   ],
   "liveFundingProof": {

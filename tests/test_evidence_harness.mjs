@@ -34,6 +34,8 @@ import {
   serializeEconomics,
   buildReleaseMessageAllocations,
   validateTransferAllocations,
+  getRpcTime,
+  verifyEmittedTransferOrChildTx,
 } from "../scripts/evidence_helper.mjs";
 
 describe("ShipLock Steward Evidence Harness Tests", () => {
@@ -1698,6 +1700,210 @@ describe("ShipLock Steward Evidence Harness Tests", () => {
       );
 
       assert.equal(writeContractCalled, false, "Must not call writeContract when allocations are missing");
+    });
+  });
+
+  describe("8. Emitted Transfers, Child Transactions & Studio Next RPC Time Gate Verification", () => {
+    it("getRpcTime retrieves on-chain block timestamp from eth_getBlockByNumber", async () => {
+      const mockClient = {
+        request: async ({ method, params }) => {
+          if (method === "eth_getBlockByNumber") {
+            return { timestamp: "0x6accd72d" }; // 1791743789 seconds -> 2026-10-11T18:36:29.000Z
+          }
+          throw new Error("unexpected method");
+        },
+      };
+
+      const rpcDate = await getRpcTime(mockClient);
+      assert.equal(rpcDate.toISOString(), "2026-10-12T12:48:45.000Z");
+    });
+
+    it("getRpcTime falls back safely to local UTC if RPC query fails", async () => {
+      const failingClient = {
+        request: async () => {
+          throw new Error("Network timeout");
+        },
+      };
+
+      const nowBefore = new Date().getTime();
+      const rpcDate = await getRpcTime(failingClient);
+      const nowAfter = new Date().getTime();
+
+      assert.ok(rpcDate.getTime() >= nowBefore && rpcDate.getTime() <= nowAfter);
+    });
+
+    it("verifyEmittedTransferOrChildTx verifies child transaction with matching recipient, amount, and finality", async () => {
+      const mockClient = {
+        getTransaction: async ({ hash }) => {
+          if (hash === "0xchild_tx_1") {
+            return {
+              hash: "0xchild_tx_1",
+              statusName: "FINALIZED",
+              txExecutionResultName: "FINISHED_WITH_RETURN",
+              to_address: "0xrecipient_addr",
+              value: "10000000000000000",
+            };
+          }
+          throw new Error("unexpected hash");
+        },
+      };
+
+      const step = {};
+      const txInfo = {
+        triggered_transactions: ["0xchild_tx_1"],
+      };
+
+      const result = await verifyEmittedTransferOrChildTx({
+        client: mockClient,
+        txInfo,
+        step,
+        expectedTarget: "0xrecipient_addr",
+        amountWei: "10000000000000000",
+        isPayout: true,
+      });
+
+      assert.equal(result, true);
+      assert.equal(step.childTransfer?.verified, true);
+      assert.equal(step.childTransfer?.status, "FINALIZED");
+      assert.equal(step.transferEvidence?.verified, true);
+      assert.equal(step.transferEvidence?.type, "PAYOUT_TO_RECIPIENT");
+    });
+
+    it("verifyEmittedTransferOrChildTx fails closed if child transaction recipient mismatches", async () => {
+      const mockClient = {
+        getTransaction: async ({ hash }) => ({
+          hash,
+          statusName: "FINALIZED",
+          txExecutionResultName: "FINISHED_WITH_RETURN",
+          to_address: "0xwrong_address",
+          value: "10000000000000000",
+        }),
+      };
+
+      const step = {};
+      const txInfo = {
+        triggered_transactions: ["0xchild_tx_mismatch"],
+      };
+
+      await assert.rejects(async () => {
+        await verifyEmittedTransferOrChildTx({
+          client: mockClient,
+          txInfo,
+          step,
+          expectedTarget: "0xexpected_address",
+          amountWei: "10000000000000000",
+          isPayout: true,
+        });
+      }, /recipient mismatch/);
+
+      assert.notEqual(step.childTransfer?.verified, true);
+    });
+
+    it("verifyEmittedTransferOrChildTx fails closed if child transaction reverted", async () => {
+      const mockClient = {
+        getTransaction: async ({ hash }) => ({
+          hash,
+          statusName: "FINALIZED",
+          txExecutionResultName: "ERROR",
+          to_address: "0xrecipient_addr",
+          value: "10000000000000000",
+        }),
+      };
+
+      const step = {};
+      const txInfo = {
+        triggered_transactions: ["0xchild_tx_error"],
+      };
+
+      await assert.rejects(async () => {
+        await verifyEmittedTransferOrChildTx({
+          client: mockClient,
+          txInfo,
+          step,
+          expectedTarget: "0xrecipient_addr",
+          amountWei: "10000000000000000",
+          isPayout: true,
+        });
+      }, /execution failed/);
+
+      assert.equal(step.childTransfer?.failed, true);
+    });
+
+    it("reconcilePendingTransaction reconciles pending child transfer on restart before setting verified: true", async () => {
+      let childChecked = false;
+      const mockClient = {
+        getTransaction: async ({ hash }) => {
+          if (hash === "0xparent_tx") {
+            return {
+              hash: "0xparent_tx",
+              statusName: "FINALIZED",
+              txExecutionResultName: "FINISHED_WITH_RETURN",
+              triggered_transactions: ["0xpending_child_tx"],
+            };
+          }
+          if (hash === "0xpending_child_tx") {
+            childChecked = true;
+            return {
+              hash: "0xpending_child_tx",
+              statusName: "FINALIZED",
+              txExecutionResultName: "FINISHED_WITH_RETURN",
+              to_address: "0xfunder_addr",
+              value: "20000000000000000",
+            };
+          }
+          throw new Error("unexpected hash");
+        },
+        readContract: async ({ functionName }) => {
+          if (functionName === "get_escrow") {
+            return {
+              status: "REFUND_NOHIT",
+              match_reason: "WINDOW_EXPIRED_NO_RELEASE",
+              refund: 20000000000000000n,
+              funder: "0xfunder_addr",
+            };
+          }
+          if (functionName === "get_economics") {
+            return {
+              escrowed_open: "0",
+              paid_to_recipients: "0",
+              refunded_to_funders: "20000000000000000",
+            };
+          }
+        },
+      };
+
+      const record = {
+        postWindowSettlement: {
+          txHash: "0xparent_tx",
+          txStatus: "PENDING",
+          preEscrowSnapshot: { status: "OPEN", amount: "20000000000000000" },
+          preEconomicsSnapshot: { escrowed_open: "20000000000000000", paid_to_recipients: "0", refunded_to_funders: "0" },
+          childTransfer: {
+            txHash: "0xpending_child_tx",
+            status: "PENDING",
+            verified: false,
+          },
+        },
+      };
+
+      const result = await reconcilePendingTransaction({
+        client: mockClient,
+        contractAddress: "0xcontract",
+        escrowId: "0xescrow_refund",
+        record,
+        stepKey: "postWindowSettlement",
+        expectedEscrowStatus: "REFUND_NOHIT",
+        expectedMatchReason: "WINDOW_EXPIRED_NO_RELEASE",
+        expectedEconomicsDelta: "REFUND",
+        amountWei: "20000000000000000",
+        saveEvidence: () => {},
+      });
+
+      assert.equal(childChecked, true, "Must have checked child transaction");
+      assert.equal(result.verified, true);
+      assert.equal(record.postWindowSettlement.childTransfer?.verified, true);
+      assert.equal(record.postWindowSettlement.childTransfer?.status, "FINALIZED");
+      assert.equal(record.postWindowSettlement.transferEvidence?.verified, true);
     });
   });
 });

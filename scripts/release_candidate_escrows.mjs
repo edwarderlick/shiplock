@@ -29,6 +29,7 @@ import {
   parseUtcIso,
   buildReleaseMessageAllocations,
   validateTransferAllocations,
+  getRpcTime,
 } from "./evidence_helper.mjs";
 
 const require = createRequire(import.meta.url);
@@ -55,8 +56,8 @@ async function main() {
   console.log(`Chain ID: 61997`);
 
   const readClient = createClient({ chain: studioDevnet });
-  const now = new Date();
-  console.log(`Current UTC Time: ${now.toISOString()}`);
+  const now = await getRpcTime(readClient);
+  console.log(`Evaluated Time Gate UTC: ${now.toISOString()}`);
 
   const evidence = readJsonSafe(EVIDENCE_FILE);
   if (!evidence) {

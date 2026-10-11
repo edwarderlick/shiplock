@@ -547,6 +547,183 @@ export function syncAttemptHistory(record, step) {
 }
 
 /**
+ * Queries Studio Next RPC for current block timestamp using eth_getBlockByNumber("latest").
+ * Falls back to local UTC if the RPC query fails or is unsupported in mock environments.
+ */
+export async function getRpcTime(client) {
+  try {
+    if (typeof client?.request === "function") {
+      const block = await client.request({ method: "eth_getBlockByNumber", params: ["latest", false] });
+      if (block?.timestamp) {
+        const sec = typeof block.timestamp === "string" && block.timestamp.startsWith("0x")
+          ? parseInt(block.timestamp, 16)
+          : Number(block.timestamp);
+        if (!isNaN(sec) && sec > 0) {
+          const rpcDate = new Date(sec * 1000);
+          console.log(`  [⏰ TIME GATE] Studio Next RPC block timestamp: ${rpcDate.toISOString()}`);
+          return rpcDate;
+        }
+      }
+    }
+  } catch (err) {
+    console.warn(`  [⚠️ NOTICE] Failed to query Studio Next RPC time (${err.message}). Falling back to local UTC.`);
+  }
+  const localDate = new Date();
+  console.log(`  [⏰ TIME GATE] Using local UTC timestamp: ${localDate.toISOString()}`);
+  return localDate;
+}
+
+/**
+ * Verifies the actual emitted transfer or child transaction for successful payout and refund before setting verified: true.
+ * Guarantees:
+ * - Reconciles any recorded pending child transfer on restart.
+ * - Inspects triggered_transactions and messages on the transaction receipt.
+ * - Verifies recipient, amount, and finalized execution result.
+ * - Fails closed before setting verified: true.
+ */
+export async function verifyEmittedTransferOrChildTx({
+  client,
+  txInfo,
+  step,
+  expectedTarget,
+  amountWei,
+  isPayout,
+  saveEvidence = () => {},
+}) {
+  const targetLower = String(expectedTarget || "").toLowerCase();
+  const amtExpected = BigInt(amountWei ?? 0);
+  const transferType = isPayout ? "PAYOUT_TO_RECIPIENT" : "REFUND_TO_FUNDER";
+
+  // 1. Reconcile previously recorded pending child transfer if present (e.g. on restart)
+  if (step.childTransfer?.txHash && !step.childTransfer?.verified) {
+    console.log(`  [🔍 RECOVERY] Reconciling pending child transfer: ${step.childTransfer.txHash}`);
+    let childTx = await client.getTransaction({ hash: step.childTransfer.txHash });
+    if (!childTx) {
+      throw new Error(`Recorded child transfer ${step.childTransfer.txHash} not found on RPC!`);
+    }
+    if (childTx.statusName !== "FINALIZED" && typeof client.waitForTransactionReceipt === "function") {
+      console.log(`    Awaiting child transfer finalization (${step.childTransfer.txHash})...`);
+      await client.waitForTransactionReceipt({
+        hash: step.childTransfer.txHash,
+        waitUntil: "finalized",
+        retries: 50,
+        interval: 3000,
+      });
+      childTx = await client.getTransaction({ hash: step.childTransfer.txHash });
+    }
+    if (
+      childTx.statusName !== "FINALIZED" ||
+      (childTx.txExecutionResultName !== "FINISHED_WITH_RETURN" && childTx.txExecutionResultName !== "SUCCESS")
+    ) {
+      step.childTransfer.failed = true;
+      saveEvidence();
+      throw new Error(
+        `Child transfer ${step.childTransfer.txHash} execution failed: status=${childTx.statusName}, result=${childTx.txExecutionResultName}`
+      );
+    }
+    const childTo = String(childTx.to_address || childTx.to || childTx.recipient || "").toLowerCase();
+    if (childTo && childTo !== targetLower) {
+      throw new Error(`Child transfer recipient mismatch: expected ${targetLower}, got ${childTo}`);
+    }
+    const childVal = BigInt(childTx.value ?? amtExpected);
+    if (childVal !== amtExpected) {
+      throw new Error(`Child transfer value mismatch: expected ${amtExpected}, got ${childVal}`);
+    }
+    step.childTransfer.status = childTx.statusName;
+    step.childTransfer.executionResult = childTx.txExecutionResultName;
+    step.childTransfer.verified = true;
+    step.childTransfer.finalizedAtUtc = new Date().toISOString();
+  }
+
+  // 2. If txInfo exposes triggered_transactions (child transactions), verify each or primary
+  if (Array.isArray(txInfo?.triggered_transactions) && txInfo.triggered_transactions.length > 0) {
+    console.log(`  [*] Inspecting ${txInfo.triggered_transactions.length} child transaction(s)...`);
+    for (const childHash of txInfo.triggered_transactions) {
+      if (!step.childTransfer) {
+        step.childTransfer = {
+          txHash: childHash,
+          status: "PENDING",
+          expectedTarget: targetLower,
+          amountWei: amtExpected.toString(),
+        };
+        saveEvidence();
+      }
+      let childTx = await client.getTransaction({ hash: childHash });
+      if (!childTx) {
+        throw new Error(`Triggered child transaction ${childHash} not found on RPC!`);
+      }
+      if (childTx.statusName !== "FINALIZED" && typeof client.waitForTransactionReceipt === "function") {
+        await client.waitForTransactionReceipt({
+          hash: childHash,
+          waitUntil: "finalized",
+          retries: 50,
+          interval: 3000,
+        });
+        childTx = await client.getTransaction({ hash: childHash });
+      }
+      if (
+        childTx.statusName !== "FINALIZED" ||
+        (childTx.txExecutionResultName !== "FINISHED_WITH_RETURN" && childTx.txExecutionResultName !== "SUCCESS")
+      ) {
+        step.childTransfer.failed = true;
+        saveEvidence();
+        throw new Error(
+          `Child transaction ${childHash} execution failed: status=${childTx.statusName}, result=${childTx.txExecutionResultName}`
+        );
+      }
+      const childTo = String(childTx.to_address || childTx.to || childTx.recipient || "").toLowerCase();
+      if (childTo && childTo !== targetLower) {
+        throw new Error(`Child transaction recipient mismatch: expected ${targetLower}, got ${childTo}`);
+      }
+      const childVal = BigInt(childTx.value ?? amtExpected);
+      if (childVal !== amtExpected) {
+        throw new Error(`Child transaction amount mismatch: expected ${amtExpected}, got ${childVal}`);
+      }
+      step.childTransfer.status = childTx.statusName;
+      step.childTransfer.executionResult = childTx.txExecutionResultName;
+      step.childTransfer.verified = true;
+      step.childTransfer.finalizedAtUtc = new Date().toISOString();
+    }
+  }
+
+  // 3. If txInfo exposes messages, verify emitted GenVM message matches expected recipient
+  if (Array.isArray(txInfo?.messages) && txInfo.messages.length > 0) {
+    console.log(`  [*] Inspecting ${txInfo.messages.length} emitted GenVM message(s)...`);
+    const matchingMsg = txInfo.messages.find((m) => {
+      const dest = String(m.recipient || m.to || m.target || "").toLowerCase();
+      return dest === targetLower;
+    });
+    if (!matchingMsg) {
+      throw new Error(`Emitted GenVM messages did not include expected recipient ${targetLower}`);
+    }
+    const msgVal = BigInt(matchingMsg.value ?? matchingMsg.amount ?? amtExpected);
+    if (msgVal !== amtExpected) {
+      throw new Error(`Emitted message value mismatch: expected ${amtExpected}, got ${msgVal}`);
+    }
+    step.emittedMessage = {
+      recipient: targetLower,
+      amountWei: amtExpected.toString(),
+      messageType: matchingMsg.messageType ?? 0,
+      verified: true,
+    };
+  }
+
+  // 4. Record comprehensive transfer evidence
+  step.transferEvidence = {
+    verified: true,
+    type: transferType,
+    targetAddress: targetLower,
+    amountWei: amtExpected.toString(),
+    childTransfer: step.childTransfer || null,
+    emittedMessage: step.emittedMessage || null,
+    verifiedAtUtc: new Date().toISOString(),
+  };
+
+  console.log(`  [✓] Verified emitted transfer / child transaction for ${transferType}: ${amtExpected} wei -> ${targetLower}`);
+  return true;
+}
+
+/**
  * Reconciles a recorded pending transaction by hash:
  * - Checks status on RPC.
  * - If still pending, awaits finalization.
@@ -572,6 +749,18 @@ export async function reconcilePendingTransaction({
     return false;
   }
   if (step.completed && step.verified) {
+    if (step.childTransfer?.txHash && !step.childTransfer?.verified) {
+      const parentTx = await client.getTransaction({ hash: step.txHash });
+      await verifyEmittedTransferOrChildTx({
+        client,
+        txInfo: parentTx,
+        step,
+        expectedTarget: step.recipient || step.funder,
+        amountWei: amountWei || step.payoutWei || step.funderRefundWei,
+        isPayout: Boolean(step.payoutWei),
+        saveEvidence,
+      });
+    }
     return {
       txHash: step.txHash,
       completed: true,
@@ -664,6 +853,17 @@ export async function reconcilePendingTransaction({
       econAfter: afterEconomics,
       expectedType: "REFUND",
       amountWei,
+    });
+
+    // Verify emitted transfer or child transaction for funder refund
+    await verifyEmittedTransferOrChildTx({
+      client,
+      txInfo,
+      step,
+      expectedTarget: afterEscrow.funder,
+      amountWei,
+      isPayout: false,
+      saveEvidence,
     });
 
     step.finalizedAtUtc = new Date().toISOString();
@@ -815,6 +1015,29 @@ export async function reconcilePendingTransaction({
     expectedType: expectedEconomicsDelta,
     amountWei,
   });
+
+  // Verify actual emitted transfer or child transaction for payouts and refunds BEFORE setting verified: true
+  if (expectedEconomicsDelta === "PAYOUT" || afterEscrow.status === "RELEASED") {
+    await verifyEmittedTransferOrChildTx({
+      client,
+      txInfo,
+      step,
+      expectedTarget: afterEscrow.recipient,
+      amountWei,
+      isPayout: true,
+      saveEvidence,
+    });
+  } else if (expectedEconomicsDelta === "REFUND" || afterEscrow.status === "REFUND_NOHIT") {
+    await verifyEmittedTransferOrChildTx({
+      client,
+      txInfo,
+      step,
+      expectedTarget: afterEscrow.funder,
+      amountWei,
+      isPayout: false,
+      saveEvidence,
+    });
+  }
 
   step.finalizedAtUtc = new Date().toISOString();
   step.txStatus = txInfo.statusName;

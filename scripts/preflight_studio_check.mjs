@@ -50,14 +50,12 @@ async function main() {
     refunded_to_funders: economics.refunded_to_funders?.toString(),
   });
 
-  // Verify total locked is at least 2.07 GEN (2070000000000000000n)
-  const escrowedOpenWei = BigInt(economics.escrowed_open.toString());
-  if (escrowedOpenWei < 2070000000000000000n) {
-    throw new Error(`Economics mismatch: escrowed_open (${escrowedOpenWei}) is less than expected 2.07 GEN`);
-  }
-
-  // 2. Query each escrow
+  // 2. Query each escrow and track dynamic stage-aware accounting totals
   console.log("\n--- 2. Escrows Preflight Status & Fee Estimation ---");
+  let dynamicExpectedOpen = 0n;
+  let dynamicExpectedPaid = 0n;
+  let dynamicExpectedRefunded = 0n;
+
   for (const item of ESCROWS_TO_CHECK) {
     console.log(`\nChecking ${item.name} (${item.id})...`);
     let esc = null;
@@ -76,18 +74,59 @@ async function main() {
     }
 
     const principalWei = BigInt((esc.principal_wei || esc.amount || 0n).toString());
+    const payoutWei = BigInt((esc.payout_recipient || esc.payout || 0n).toString());
+    const refundWei = BigInt((esc.refund_funder || esc.refund || 0n).toString());
+
     console.log(`  Status: ${esc.status}, match_reason: ${esc.match_reason}, principal: ${principalWei.toString()} wei`);
     console.log(`  Funder: ${esc.funder}, Recipient: ${esc.recipient}`);
 
-    if (item.expectedStatus && esc.status !== item.expectedStatus) {
-      throw new Error(`Escrow ${item.name} status mismatch: expected ${item.expectedStatus}, got ${esc.status}`);
-    }
+    // Verify principal matches expected allocation
     if (item.expectedAmount && principalWei !== item.expectedAmount) {
       throw new Error(`Escrow ${item.name} principal mismatch: expected ${item.expectedAmount.toString()}, got ${principalWei.toString()}`);
     }
 
-    // 3. Test allocation construction and authoritative fee estimation
-    if (item.testReleaseFees) {
+    // Stage-aware status validation
+    const VALID_LIFECYCLE_STATUSES = ["OPEN", "RELEASED", "REFUND_NOHIT", "CANCELED", "EXPIRED"];
+    if (!VALID_LIFECYCLE_STATUSES.includes(esc.status)) {
+      throw new Error(`Escrow ${item.name} has unrecognized status: ${esc.status}`);
+    }
+
+    if (esc.status === "OPEN") {
+      dynamicExpectedOpen += principalWei;
+      if (payoutWei !== 0n || refundWei !== 0n) {
+        throw new Error(`Escrow ${item.name} is OPEN but has non-zero payout (${payoutWei}) or refund (${refundWei})`);
+      }
+    } else if (esc.status === "RELEASED") {
+      dynamicExpectedPaid += principalWei;
+      if (esc.match_reason !== "200_IN_WINDOW") {
+        throw new Error(`Escrow ${item.name} is RELEASED but match_reason is '${esc.match_reason}' (expected 200_IN_WINDOW)`);
+      }
+      if (payoutWei !== principalWei) {
+        throw new Error(`Escrow ${item.name} is RELEASED but payout (${payoutWei}) does not match principal (${principalWei})`);
+      }
+      console.log(`  ✓ Verified legitimate terminal RELEASED settlement state (payout: ${payoutWei} wei)`);
+    } else if (esc.status === "REFUND_NOHIT") {
+      dynamicExpectedRefunded += principalWei;
+      if (esc.match_reason !== "WINDOW_EXPIRED_NO_RELEASE") {
+        throw new Error(`Escrow ${item.name} is REFUND_NOHIT but match_reason is '${esc.match_reason}' (expected WINDOW_EXPIRED_NO_RELEASE)`);
+      }
+      if (refundWei !== principalWei) {
+        throw new Error(`Escrow ${item.name} is REFUND_NOHIT but refund (${refundWei}) does not match principal (${principalWei})`);
+      }
+      console.log(`  ✓ Verified legitimate terminal REFUND_NOHIT settlement state (refund: ${refundWei} wei)`);
+    } else if (esc.status === "CANCELED") {
+      dynamicExpectedRefunded += principalWei;
+      if (esc.match_reason !== "CANCELED") {
+        throw new Error(`Escrow ${item.name} is CANCELED but match_reason is '${esc.match_reason}' (expected CANCELED)`);
+      }
+      if (refundWei !== principalWei) {
+        throw new Error(`Escrow ${item.name} is CANCELED but refund (${refundWei}) does not match principal (${principalWei})`);
+      }
+      console.log(`  ✓ Verified legitimate terminal CANCELED settlement state (refund: ${refundWei} wei)`);
+    }
+
+    // 3. Test allocation construction and authoritative fee estimation for OPEN escrows
+    if (esc.status === "OPEN" && item.testReleaseFees) {
       console.log(`  Testing allocation construction and authoritative fee estimation for release...`);
       const completeAllocs = buildReleaseMessageAllocations({
         recipient: esc.recipient,
@@ -131,6 +170,33 @@ async function main() {
       console.log(`  ✓ Authoritative fees validated: totalMessageFees=${authFees.distribution.totalMessageFees}, feeValue=${authFees.feeValue}`);
     }
   }
+
+  // Verify dynamic stage-aware economics invariants
+  console.log("\n--- 3. Stage-Aware Economics Reconciliation ---");
+  const escrowedOpenWei = BigInt(economics.escrowed_open.toString());
+  const paidToRecipientsWei = BigInt(economics.paid_to_recipients.toString());
+  const refundedToFundersWei = BigInt(economics.refunded_to_funders.toString());
+
+  console.log(`  Contract escrowed_open:      ${escrowedOpenWei.toString()} wei (expected: ${dynamicExpectedOpen.toString()})`);
+  console.log(`  Contract paid_to_recipients:  ${paidToRecipientsWei.toString()} wei (expected >= ${dynamicExpectedPaid.toString()})`);
+  console.log(`  Contract refunded_to_funders: ${refundedToFundersWei.toString()} wei (expected >= ${dynamicExpectedRefunded.toString()})`);
+
+  if (escrowedOpenWei !== dynamicExpectedOpen) {
+    throw new Error(
+      `Economics mismatch: contract escrowed_open (${escrowedOpenWei}) does not match sum of currently OPEN escrows (${dynamicExpectedOpen})`
+    );
+  }
+  if (paidToRecipientsWei < dynamicExpectedPaid) {
+    throw new Error(
+      `Economics mismatch: contract paid_to_recipients (${paidToRecipientsWei}) is less than sum of RELEASED escrows (${dynamicExpectedPaid})`
+    );
+  }
+  if (refundedToFundersWei < dynamicExpectedRefunded) {
+    throw new Error(
+      `Economics mismatch: contract refunded_to_funders (${refundedToFundersWei}) is less than sum of refunded/canceled escrows (${dynamicExpectedRefunded})`
+    );
+  }
+  console.log("  ✓ Stage-aware economics verified: all balances reconcile with on-chain escrow states.");
 
   console.log("\n=======================================================");
   console.log("✓ Preflight check succeeded for all 6 escrows.");
