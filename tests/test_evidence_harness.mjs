@@ -32,6 +32,8 @@ import {
   syncAttemptHistory,
   serializeEscrow,
   serializeEconomics,
+  buildReleaseMessageAllocations,
+  validateTransferAllocations,
 } from "../scripts/evidence_helper.mjs";
 
 describe("ShipLock Steward Evidence Harness Tests", () => {
@@ -1252,11 +1254,66 @@ describe("ShipLock Steward Evidence Harness Tests", () => {
     });
   });
 
-  describe("7. Mode 1 Message Allocations in Evidence Runners", () => {
+  describe("7. Mode 1 Message Allocations in Evidence Runners & Cross-Boundary Protection", () => {
     const CONTRACT_ADDRESS = "0x7Cef756668Cd925807e8B110D0330643c6F809E3";
     const funder = "0x1111111111111111111111111111111111111111";
     const recipient = "0x2222222222222222222222222222222222222222";
     const escrowId = "0x7f24e638ea5ed353c377f968352fdf9d2e1c66959fa739fa69d1d32e54d58d53";
+
+    it("validateTransferAllocations rejects unsafe empty allocations for release", () => {
+      assert.throws(
+        () =>
+          validateTransferAllocations({
+            functionName: "release",
+            distribution: {
+              leaderTimeunitsAllocation: 200n,
+              validatorTimeunitsAllocation: 400n,
+              totalMessageFees: 0n,
+            },
+            messageAllocations: [],
+            mustHaveTransfer: true,
+            expectedRecipients: [recipient, funder],
+          }),
+        /Fee estimation produced an unsafe empty allocation tree for transfer in release/
+      );
+    });
+
+    it("validateTransferAllocations rejects release allocations missing recipient or funder", () => {
+      assert.throws(
+        () =>
+          validateTransferAllocations({
+            functionName: "release",
+            distribution: {
+              leaderTimeunitsAllocation: 200n,
+              validatorTimeunitsAllocation: 400n,
+              totalMessageFees: 150000000000000n,
+            },
+            messageAllocations: [
+              {
+                recipient,
+                budget: 150000000000000n,
+              },
+            ],
+            mustHaveTransfer: true,
+            expectedRecipients: [recipient, funder],
+          }),
+        /Release message allocations missing required recipient/
+      );
+    });
+
+    it("buildReleaseMessageAllocations constructs valid allocation tree covering recipient and funder", () => {
+      const allocs = buildReleaseMessageAllocations({ recipient, funder });
+      assert.equal(allocs.length, 2);
+      assert.equal(allocs[0].recipient, recipient);
+      assert.equal(allocs[1].recipient, funder);
+      assert.equal(typeof allocs[0].parentIndex, "bigint");
+      assert.equal(typeof allocs[1].parentIndex, "bigint");
+      assert.equal(allocs[0].parentIndex, allocs[1].parentIndex);
+      assert.ok(allocs[0].budget > 0n);
+      assert.ok(allocs[1].budget > 0n);
+      assert.match(allocs[0].callKey, /^0x[0-9a-fA-F]{64}$/);
+      assert.match(allocs[1].callKey, /^0x[0-9a-fA-F]{64}$/);
+    });
 
     it("evidence runner cancel submitFn preserves and passes messageAllocations to writeContract", async () => {
       let capturedFees = null;
@@ -1316,26 +1373,22 @@ describe("ShipLock Steward Evidence Harness Tests", () => {
       assert.equal(capturedFees.distribution.totalMessageFees, 150000000000000n);
     });
 
-    it("evidence runner candidate release payout submitFn preserves and passes messageAllocations", async () => {
+    it("evidence runner candidate release payout submitFn builds complete [recipient, funder] allocations", async () => {
       let capturedFees = null;
       const mockClient = {
-        estimateTransactionFeesForWrite: async () => ({
+        readContract: async () => ({
+          recipient,
+          funder,
+        }),
+        estimateTransactionFees: async ({ messageAllocations }) => ({
           distribution: {
             leaderTimeunitsAllocation: 200n,
             validatorTimeunitsAllocation: 400n,
-            totalMessageFees: 150000000000000n,
+            totalMessageFees: 300000000000000n,
             rotations: [0n],
           },
-          messageAllocations: [
-            {
-              messageType: 0,
-              recipient: recipient,
-              callKey: "0x0000000000000000000000000000000000000000000000000000000000000000",
-              budget: 150000000000000n,
-              feeParams: "0x01",
-            },
-          ],
-          feeValue: 300000000000000n,
+          messageAllocations,
+          feeValue: 350000000000000n,
         }),
         writeContract: async (params) => {
           capturedFees = params.fees;
@@ -1343,15 +1396,25 @@ describe("ShipLock Steward Evidence Harness Tests", () => {
         },
       };
 
-      const feeEst = await mockClient.estimateTransactionFeesForWrite({
-        address: CONTRACT_ADDRESS,
-        functionName: "release",
-        args: [escrowId],
+      const escrow = await mockClient.readContract();
+      const messageAllocations = buildReleaseMessageAllocations({
+        recipient: escrow.recipient,
+        funder: escrow.funder,
+      });
+      const feeEst = await mockClient.estimateTransactionFees({
         leaderTimeunitsAllocation: 200n,
         validatorTimeunitsAllocation: 400n,
         rotations: [0n],
+        messageAllocations,
       });
-      assert.ok(feeEst.messageAllocations?.length > 0);
+
+      validateTransferAllocations({
+        functionName: "release",
+        distribution: feeEst.distribution,
+        messageAllocations: feeEst.messageAllocations,
+        mustHaveTransfer: true,
+        expectedRecipients: [escrow.recipient, escrow.funder],
+      });
 
       const txHash = await mockClient.writeContract({
         address: CONTRACT_ADDRESS,
@@ -1366,29 +1429,28 @@ describe("ShipLock Steward Evidence Harness Tests", () => {
 
       assert.equal(txHash, "0xtx_cand_release_hash");
       assert.ok(capturedFees.messageAllocations);
+      assert.equal(capturedFees.messageAllocations.length, 2);
       assert.equal(capturedFees.messageAllocations[0].recipient, recipient);
+      assert.equal(capturedFees.messageAllocations[1].recipient, funder);
+      assert.equal(capturedFees.distribution.totalMessageFees, 300000000000000n);
     });
 
-    it("evidence runner post-window refund submitFn preserves and passes messageAllocations", async () => {
+    it("evidence runner post-window refund submitFn builds complete [recipient, funder] allocations", async () => {
       let capturedFees = null;
       const mockClient = {
-        estimateTransactionFeesForWrite: async () => ({
+        readContract: async () => ({
+          recipient,
+          funder,
+        }),
+        estimateTransactionFees: async ({ messageAllocations }) => ({
           distribution: {
             leaderTimeunitsAllocation: 200n,
             validatorTimeunitsAllocation: 400n,
-            totalMessageFees: 150000000000000n,
+            totalMessageFees: 300000000000000n,
             rotations: [0n],
           },
-          messageAllocations: [
-            {
-              messageType: 0,
-              recipient: funder,
-              callKey: "0x0000000000000000000000000000000000000000000000000000000000000000",
-              budget: 150000000000000n,
-              feeParams: "0x01",
-            },
-          ],
-          feeValue: 300000000000000n,
+          messageAllocations,
+          feeValue: 350000000000000n,
         }),
         writeContract: async (params) => {
           capturedFees = params.fees;
@@ -1396,15 +1458,25 @@ describe("ShipLock Steward Evidence Harness Tests", () => {
         },
       };
 
-      const feeEst = await mockClient.estimateTransactionFeesForWrite({
-        address: CONTRACT_ADDRESS,
-        functionName: "release",
-        args: [escrowId],
+      const escrow = await mockClient.readContract();
+      const messageAllocations = buildReleaseMessageAllocations({
+        recipient: escrow.recipient,
+        funder: escrow.funder,
+      });
+      const feeEst = await mockClient.estimateTransactionFees({
         leaderTimeunitsAllocation: 200n,
         validatorTimeunitsAllocation: 400n,
         rotations: [0n],
+        messageAllocations,
       });
-      assert.ok(feeEst.messageAllocations?.length > 0);
+
+      validateTransferAllocations({
+        functionName: "release",
+        distribution: feeEst.distribution,
+        messageAllocations: feeEst.messageAllocations,
+        mustHaveTransfer: true,
+        expectedRecipients: [escrow.recipient, escrow.funder],
+      });
 
       const txHash = await mockClient.writeContract({
         address: CONTRACT_ADDRESS,
@@ -1419,7 +1491,164 @@ describe("ShipLock Steward Evidence Harness Tests", () => {
 
       assert.equal(txHash, "0xtx_post_refund_hash");
       assert.ok(capturedFees.messageAllocations);
-      assert.equal(capturedFees.messageAllocations[0].recipient, funder);
+      assert.equal(capturedFees.messageAllocations.length, 2);
+      assert.equal(capturedFees.messageAllocations[0].recipient, recipient);
+      assert.equal(capturedFees.messageAllocations[1].recipient, funder);
+    });
+
+    it("runner cross-boundary release: simulation observes EARLY_404_RETRYABLE with 0 messages, but runner submits complete allocations, transaction executes refund after window_end, reconciling to REFUND_NOHIT and preventing duplicate settlement", async () => {
+      let capturedFees = null;
+      let writeContractCalled = false;
+      let readCount = 0;
+
+      // 1. Simulation at submission time observes EARLY_404_RETRYABLE with 0 emitted messages
+      const mockSimulationResult = {
+        distribution: {
+          leaderTimeunitsAllocation: 200n,
+          validatorTimeunitsAllocation: 400n,
+          totalMessageFees: 0n,
+          rotations: [0n],
+        },
+        messageAllocations: [], // Zero emissions observed!
+        feeValue: 200000000000000n,
+      };
+
+      const mockClient = {
+        getTransaction: async ({ hash }) => {
+          assert.equal(hash, "0xtx_cross_boundary_refund");
+          return {
+            statusName: "FINALIZED",
+            txExecutionResultName: "FINISHED_WITH_RETURN",
+          };
+        },
+        readContract: async ({ functionName }) => {
+          if (functionName === "get_escrow") {
+            readCount++;
+            if (readCount <= 1) {
+              // Pre-execution baseline: escrow is OPEN with 20000000000000000n
+              return {
+                status: "OPEN",
+                match_reason: "NONE",
+                amount: 20000000000000000n,
+                payout: 0n,
+                refund: 0n,
+                funder,
+                recipient,
+              };
+            }
+            // Post-execution: cross-boundary execution reaches REFUND_NOHIT after window_end
+            return {
+              status: "REFUND_NOHIT",
+              match_reason: "WINDOW_EXPIRED_NO_RELEASE",
+              amount: 20000000000000000n,
+              payout: 0n,
+              refund: 20000000000000000n,
+              funder,
+              recipient,
+            };
+          }
+          if (functionName === "get_economics") {
+            if (readCount <= 1) {
+              // Pre-execution baseline economics
+              return {
+                escrowed_open: "60000000000000000",
+                paid_to_recipients: "0",
+                refunded_to_funders: "0",
+              };
+            }
+            // Post-execution economics: 20000000000000000 refunded
+            return {
+              escrowed_open: "40000000000000000",
+              paid_to_recipients: "0",
+              refunded_to_funders: "20000000000000000",
+            };
+          }
+        },
+        waitForTransactionReceipt: async () => {},
+      };
+
+      const record = {
+        id: escrowId,
+        principalWei: "20000000000000000",
+        early404Verified: false,
+        refundSettlementVerified: false,
+        inWindowAttempt: null,
+        inWindowAttempts: [],
+        finalState: {},
+      };
+
+      // Runner submitFn: refuses empty allocations for release, builds complete allocations covering recipient and funder
+      const submitFn = async () => {
+        writeContractCalled = true;
+        assert.equal(mockSimulationResult.messageAllocations.length, 0);
+
+        const completeAllocations = buildReleaseMessageAllocations({ recipient, funder });
+        assert.equal(completeAllocations.length, 2);
+
+        const authoritativeFees = {
+          distribution: {
+            leaderTimeunitsAllocation: 200n,
+            validatorTimeunitsAllocation: 400n,
+            totalMessageFees: 300000000000000n,
+            rotations: [0n],
+          },
+          messageAllocations: completeAllocations,
+          feeValue: 500000000000000n,
+        };
+
+        validateTransferAllocations({
+          functionName: "release",
+          distribution: authoritativeFees.distribution,
+          messageAllocations: authoritativeFees.messageAllocations,
+          mustHaveTransfer: true,
+          expectedRecipients: [recipient, funder],
+        });
+
+        capturedFees = authoritativeFees;
+        return "0xtx_cross_boundary_refund";
+      };
+
+      await runInWindowCheckStep({
+        client: mockClient,
+        contractAddress: CONTRACT_ADDRESS,
+        escrowId,
+        record,
+        submitFn,
+        saveEvidence: () => {},
+      });
+
+      assert.equal(writeContractCalled, true);
+      assert.ok(capturedFees.messageAllocations);
+      assert.equal(capturedFees.messageAllocations.length, 2);
+      assert.equal(capturedFees.messageAllocations[0].recipient, recipient);
+      assert.equal(capturedFees.messageAllocations[1].recipient, funder);
+      assert.equal(capturedFees.distribution.totalMessageFees, 300000000000000n);
+
+      // Reconciled correctly as cross-boundary refund:
+      assert.equal(record.refundSettlementVerified, true, "Refund settlement must be verified");
+      assert.equal(record.early404Verified, false, "Early 404 must NOT be marked verified for cross-boundary refund");
+      assert.equal(record.inWindowAttempt.resultingEscrowStatus, "REFUND_NOHIT");
+      assert.equal(record.inWindowAttempt.resultingMatchReason, "WINDOW_EXPIRED_NO_RELEASE");
+      assert.equal(record.finalState.settled, true);
+      assert.equal(record.finalState.status, "REFUND_NOHIT");
+
+      // Verify duplicate settlement prevention on subsequent run
+      let duplicateSubmitted = false;
+      const secondResult = await runInWindowCheckStep({
+        client: mockClient,
+        contractAddress: CONTRACT_ADDRESS,
+        escrowId,
+        record,
+        submitFn: async () => {
+          duplicateSubmitted = true;
+          return "0xduplicate";
+        },
+        saveEvidence: () => {},
+      });
+
+      assert.equal(duplicateSubmitted, false, "Must never submit duplicate settlement when already verified");
+      assert.equal(secondResult.skipped, true);
+      assert.equal(secondResult.refundSettlementVerified, true);
     });
 
     it("evidence runner stops without submitting if estimation cannot produce messageAllocations for transfer", async () => {

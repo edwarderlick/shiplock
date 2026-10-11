@@ -1,5 +1,10 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-import { createClient, isSuccessful } from "genlayer-js";
+import {
+  createClient,
+  isSuccessful,
+  encodeExternalMessageFeeParams,
+  deriveExternalMessageCallKey,
+  MESSAGE_ALLOCATION_ROOT_PARENT_INDEX,
+} from "genlayer-js";
 import { studioDevnet } from "genlayer-js/chains";
 import { CONTRACT_ADDRESS, CHAIN_ID } from "./env";
 import feeProfile from "../fee-profile.json";
@@ -51,16 +56,63 @@ export function validatePhaseAllocations(distribution: {
   }
 }
 
+export function buildReleaseMessageAllocations({
+  recipient,
+  funder,
+  budget = 150000000000000n,
+  gasLimit = 500000n,
+  maxGasPrice = 300000000n,
+}: {
+  recipient: string;
+  funder: string;
+  budget?: bigint;
+  gasLimit?: bigint;
+  maxGasPrice?: bigint;
+}) {
+  const rClean = assertAddress(recipient, "escrow.recipient");
+  const fClean = assertAddress(funder, "escrow.funder");
+  const feeParams = encodeExternalMessageFeeParams({ gasLimit, maxGasPrice });
+  const callKey = deriveExternalMessageCallKey();
+
+  const recipientNode = {
+    messageType: 0,
+    onAcceptance: false,
+    parentIndex: MESSAGE_ALLOCATION_ROOT_PARENT_INDEX,
+    recipient: rClean,
+    callKey,
+    budget,
+    feeParams,
+  };
+
+  if (rClean.toLowerCase() === fClean.toLowerCase()) {
+    return [recipientNode];
+  }
+
+  const funderNode = {
+    messageType: 0,
+    onAcceptance: false,
+    parentIndex: MESSAGE_ALLOCATION_ROOT_PARENT_INDEX,
+    recipient: fClean,
+    callKey,
+    budget,
+    feeParams,
+  };
+
+  return [recipientNode, funderNode];
+}
+
 export function validateTransferAllocations({
   functionName,
   distribution,
   messageAllocations,
   mustHaveTransfer = false,
+  expectedRecipients = [],
 }: {
   functionName: string;
   distribution?: any;
   messageAllocations?: any[];
   mustHaveTransfer?: boolean;
+  expectedRecipients?: string[];
 }): void {
   const totalMessageFees = BigInt(distribution?.totalMessageFees ?? 0);
   const hasAllocations = Array.isArray(messageAllocations) && messageAllocations.length > 0;
@@ -72,7 +124,14 @@ export function validateTransferAllocations({
     );
   }
 
-  // If a transfer is mandatory for this call (cancel, expire, withdraw):
+  // If function is release, an empty allocation tree is strictly unsafe and rejected before sending
+  if (functionName === "release" && !hasAllocations) {
+    throw new Error(
+      `Fee estimation produced an unsafe empty allocation tree for transfer in release. A release transaction must cover both recipient payout and funder refund to protect against cross-boundary execution. Aborting before wallet signing.`
+    );
+  }
+
+  // If a transfer is mandatory for this call (cancel, expire, withdraw, release):
   if (mustHaveTransfer && !hasAllocations) {
     throw new Error(
       `Fee estimation cannot produce a valid message allocation for transfer in ${functionName}. Aborting before wallet signing.`
@@ -80,13 +139,50 @@ export function validateTransferAllocations({
   }
 
   if (hasAllocations) {
+    let sumBudgets = 0n;
+    const recipientsInAllocations = new Set<string>();
+
     for (let i = 0; i < messageAllocations!.length; i++) {
       const alloc = messageAllocations![i];
-      if (!alloc || !alloc.recipient || typeof alloc.recipient !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(alloc.recipient.trim())) {
+      if (
+        !alloc ||
+        !alloc.recipient ||
+        typeof alloc.recipient !== "string" ||
+        !/^0x[0-9a-fA-F]{40}$/.test(alloc.recipient.trim())
+      ) {
         throw new Error(`Message allocation at index ${i} has invalid recipient: ${alloc?.recipient}`);
       }
+      recipientsInAllocations.add(alloc.recipient.trim().toLowerCase());
       if (BigInt(alloc.budget ?? 0) <= 0n) {
         throw new Error(`Message allocation at index ${i} has non-positive budget: ${alloc?.budget}`);
+      }
+
+      const parentIdx =
+        alloc.parentIndex !== undefined
+          ? BigInt(alloc.parentIndex)
+          : MESSAGE_ALLOCATION_ROOT_PARENT_INDEX;
+      if (parentIdx === MESSAGE_ALLOCATION_ROOT_PARENT_INDEX) {
+        sumBudgets += BigInt(alloc.budget);
+      }
+    }
+
+    if (
+      distribution?.totalMessageFees !== undefined &&
+      BigInt(distribution.totalMessageFees) !== sumBudgets
+    ) {
+      throw new Error(
+        `Distribution totalMessageFees (${distribution.totalMessageFees}) does not match sum of root message allocations (${sumBudgets})`
+      );
+    }
+
+    if (Array.isArray(expectedRecipients) && expectedRecipients.length > 0) {
+      for (const expected of expectedRecipients) {
+        const cleanExpected = assertAddress(expected, "expected recipient").toLowerCase();
+        if (!recipientsInAllocations.has(cleanExpected)) {
+          throw new Error(
+            `Release message allocations missing required recipient ${expected}. Both recipient payout and funder refund allocations are required to protect against cross-boundary execution. Aborting before wallet signing.`
+          );
+        }
       }
     }
   }
@@ -227,68 +323,130 @@ export async function writeIc({
     messageAllocations = quote.messageAllocations;
   }
 
-  // Use client.estimateTransactionFeesForWrite (Studio simulation / supported estimation):
-  // Required whenever messageAllocations is missing for a transfer call, or when quote wasn't provided
-  if (!distribution || (isTransferCall && (!messageAllocations || messageAllocations.length === 0))) {
-    if (typeof client?.estimateTransactionFeesForWrite === "function") {
+  let expectedRecipients: string[] | undefined = undefined;
+
+  // Handle release transactions specially:
+  // Consensus could reach recipient payout (200), early 404 (0 messages), or funder refund (cross-boundary / expired).
+  // A pre-submit simulation may observe early 404 and return no messageAllocations (or incomplete quote).
+  // We must make every release transaction safe for each outcome it could reach during consensus.
+  if (functionName === "release") {
+    const escrowId = args[0];
+    if (!escrowId) throw new Error("Escrow ID missing for release");
+
+    let escrow: any = null;
+    try {
+      escrow = await client.readContract({
+        address: contract,
+        functionName: "get_escrow",
+        args: [escrowId],
+      });
+    } catch (readErr: any) {
+      throw new Error(
+        `Failed to read escrow ${escrowId} for release fee configuration: ${readErr?.message || readErr}. Aborting before wallet signing.`
+      );
+    }
+    if (!escrow) {
+      throw new Error(`Escrow not found: ${escrowId}`);
+    }
+
+    const recipient = assertAddress(escrow.recipient, "escrow.recipient");
+    const funder = assertAddress(escrow.funder, "escrow.funder");
+    expectedRecipients = recipient.toLowerCase() === funder.toLowerCase() ? [recipient] : [recipient, funder];
+
+    // If a quote was provided, check if it already safely covers both recipients.
+    // If quote is missing or empty (e.g. simulation observed early 404 branch and returned no allocations)
+    // or does not cover both recipients, build complete allocation tree and compute authoritative fee quote.
+    const quoteHasBothRecipients =
+      Array.isArray(messageAllocations) &&
+      messageAllocations.length > 0 &&
+      expectedRecipients.every((r) =>
+        messageAllocations.some((m: any) => m?.recipient?.toLowerCase() === r.toLowerCase())
+      );
+
+    if (!quoteHasBothRecipients) {
+      const completeAllocations = buildReleaseMessageAllocations({ recipient, funder });
       try {
-        const callerAccount = { address: wallet };
-        const writeEst = await client.estimateTransactionFeesForWrite({
-          account: callerAccount,
-          address: contract,
-          functionName,
-          args,
-          value: value ?? 0n,
+        const est = await client.estimateTransactionFees({
           leaderTimeunitsAllocation: leaderAlloc,
           validatorTimeunitsAllocation: validatorAlloc,
           rotations: [BigInt(prof.rotationsPerRound ?? "1")],
+          messageAllocations: completeAllocations,
         });
-        distribution = writeEst.distribution;
-        feeValue = writeEst.feeValue;
-        messageAllocations = writeEst.messageAllocations;
+        distribution = est.distribution;
+        feeValue = est.feeValue;
+        messageAllocations = est.messageAllocations;
       } catch (estErr: any) {
-        if (isTransferCall) {
-          // If estimation cannot produce a valid allocation for a transfer, stop before wallet signing; never silently use the generic fallback
-          throw new Error(
-            `Fee estimation cannot produce a valid message allocation for transfer in ${functionName}: ${estErr.message || estErr}. Aborting before wallet signing.`
-          );
-        }
-        if (isTemporaryNetworkOrTransportError(estErr)) {
-          console.warn("estimateTransactionFeesForWrite network fallback:", estErr);
-        } else {
-          throw estErr;
+        throw new Error(
+          `Fee estimation cannot produce or validate fee configuration covering release transfer: ${estErr?.message || estErr}. Aborting before wallet signing.`
+        );
+      }
+    }
+  } else {
+    // For non-release transfer calls or regular calls:
+    // Use client.estimateTransactionFeesForWrite (Studio simulation / supported estimation):
+    // Required whenever messageAllocations is missing for a transfer call, or when quote wasn't provided
+    if (!distribution || (isTransferCall && (!messageAllocations || messageAllocations.length === 0))) {
+      if (typeof client?.estimateTransactionFeesForWrite === "function") {
+        try {
+          const callerAccount = { address: wallet };
+          const writeEst = await client.estimateTransactionFeesForWrite({
+            account: callerAccount,
+            address: contract,
+            functionName,
+            args,
+            value: value ?? 0n,
+            leaderTimeunitsAllocation: leaderAlloc,
+            validatorTimeunitsAllocation: validatorAlloc,
+            rotations: [BigInt(prof.rotationsPerRound ?? "1")],
+          });
+          distribution = writeEst.distribution;
+          feeValue = writeEst.feeValue;
+          messageAllocations = writeEst.messageAllocations;
+        } catch (estErr: any) {
+          if (isTransferCall) {
+            // If estimation cannot produce a valid allocation for a transfer, stop before wallet signing; never silently use the generic fallback
+            throw new Error(
+              `Fee estimation cannot produce a valid message allocation for transfer in ${functionName}: ${estErr.message || estErr}. Aborting before wallet signing.`
+            );
+          }
+          if (isTemporaryNetworkOrTransportError(estErr)) {
+            console.warn("estimateTransactionFeesForWrite network fallback:", estErr);
+          } else {
+            throw estErr;
+          }
         }
       }
     }
-  }
 
-  // Generic fallback: ONLY allowed for non-transfer calls on temporary network error
-  if (!distribution) {
-    if (isTransferCall) {
-      throw new Error(
-        `Fee estimation cannot produce a valid message allocation for transfer in ${functionName}. Aborting before wallet signing.`
-      );
+    // Generic fallback: ONLY allowed for non-transfer calls on temporary network error
+    if (!distribution) {
+      if (isTransferCall) {
+        throw new Error(
+          `Fee estimation cannot produce a valid message allocation for transfer in ${functionName}. Aborting before wallet signing.`
+        );
+      }
+      const fallbackEst = await client.estimateTransactionFees({
+        leaderTimeunitsAllocation: leaderAlloc,
+        validatorTimeunitsAllocation: validatorAlloc,
+        rotations: [BigInt(prof.rotationsPerRound ?? "1")],
+      });
+      distribution = fallbackEst.distribution;
+      feeValue = fallbackEst.feeValue;
+      messageAllocations = fallbackEst.messageAllocations;
     }
-    const fallbackEst = await client.estimateTransactionFees({
-      leaderTimeunitsAllocation: leaderAlloc,
-      validatorTimeunitsAllocation: validatorAlloc,
-      rotations: [BigInt(prof.rotationsPerRound ?? "1")],
-    });
-    distribution = fallbackEst.distribution;
-    feeValue = fallbackEst.feeValue;
-    messageAllocations = fallbackEst.messageAllocations;
   }
 
   // Validate phase allocation bounds (30-600) before wallet signing or transaction submission
   validatePhaseAllocations(distribution);
 
   // Validate transfer message allocations before wallet signing
-  const mustHaveTransfer = ["cancel", "expire", "withdraw"].includes(functionName);
+  const mustHaveTransfer = ["cancel", "release", "expire", "withdraw"].includes(functionName);
   validateTransferAllocations({
     functionName,
     distribution,
     messageAllocations,
     mustHaveTransfer,
+    expectedRecipients,
   });
 
   const preWriteLog = {

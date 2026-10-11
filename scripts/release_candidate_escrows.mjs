@@ -27,6 +27,8 @@ import {
   executeWithBaselineSnapshot,
   queryRegistryMetadata,
   parseUtcIso,
+  buildReleaseMessageAllocations,
+  validateTransferAllocations,
 } from "./evidence_helper.mjs";
 
 const require = createRequire(import.meta.url);
@@ -237,17 +239,23 @@ async function main() {
       record: cand,
       stepKey: "releaseAttempt",
       submitFn: async () => {
-        const feeEst = await writeClient.estimateTransactionFeesForWrite({
-          address: CONTRACT_ADDRESS,
-          functionName: "release",
-          args: [cand.id],
+        const messageAllocations = buildReleaseMessageAllocations({
+          recipient: escrow.recipient,
+          funder: escrow.funder,
+        });
+        const feeEst = await writeClient.estimateTransactionFees({
           leaderTimeunitsAllocation: 200n,
           validatorTimeunitsAllocation: 400n,
           rotations: [0n],
+          messageAllocations,
         });
-        if (!feeEst.messageAllocations || feeEst.messageAllocations.length === 0) {
-          throw new Error(`Failed to estimate message allocations for candidate release payout of ${cand.id}`);
-        }
+        validateTransferAllocations({
+          functionName: "release",
+          distribution: feeEst.distribution,
+          messageAllocations: feeEst.messageAllocations,
+          mustHaveTransfer: true,
+          expectedRecipients: [escrow.recipient, escrow.funder],
+        });
         return await writeClient.writeContract({
           address: CONTRACT_ADDRESS,
           functionName: "release",

@@ -13,6 +13,15 @@
 
 import { writeFileSync, readFileSync, renameSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
+const rootDir = resolve(import.meta.dirname, "..");
+const {
+  encodeExternalMessageFeeParams,
+  deriveExternalMessageCallKey,
+  MESSAGE_ALLOCATION_ROOT_PARENT_INDEX,
+} = require(resolve(rootDir, "web/node_modules/genlayer-js/dist/index.js"));
 
 /**
  * Write JSON atomically via temporary file rename to prevent file corruption.
@@ -1092,4 +1101,133 @@ export async function executeWithPendingRecovery({
   }
 
   return { txHash, txInfo };
+}
+
+/**
+ * Builds the complete allocation tree covering both recipient payout and funder refund for release transactions.
+ */
+export function buildReleaseMessageAllocations({
+  recipient,
+  funder,
+  budget = 150000000000000n,
+  gasLimit = 500000n,
+  maxGasPrice = 300000000n,
+}) {
+  const rClean = String(recipient || "").trim();
+  const fClean = String(funder || "").trim();
+  if (!/^0x[0-9a-fA-F]{40}$/.test(rClean)) throw new Error(`Invalid recipient: ${recipient}`);
+  if (!/^0x[0-9a-fA-F]{40}$/.test(fClean)) throw new Error(`Invalid funder: ${funder}`);
+
+  const feeParams = encodeExternalMessageFeeParams({ gasLimit, maxGasPrice });
+  const callKey = deriveExternalMessageCallKey();
+
+  const recipientNode = {
+    messageType: 0,
+    onAcceptance: false,
+    parentIndex: MESSAGE_ALLOCATION_ROOT_PARENT_INDEX,
+    recipient: rClean,
+    callKey,
+    budget,
+    feeParams,
+  };
+
+  if (rClean.toLowerCase() === fClean.toLowerCase()) {
+    return [recipientNode];
+  }
+
+  const funderNode = {
+    messageType: 0,
+    onAcceptance: false,
+    parentIndex: MESSAGE_ALLOCATION_ROOT_PARENT_INDEX,
+    recipient: fClean,
+    callKey,
+    budget,
+    feeParams,
+  };
+
+  return [recipientNode, funderNode];
+}
+
+/**
+ * Validates message allocations and phase bounds for transfer-emitting calls.
+ */
+export function validateTransferAllocations({
+  functionName,
+  distribution,
+  messageAllocations,
+  mustHaveTransfer = false,
+  expectedRecipients = [],
+}) {
+  const totalMessageFees = BigInt(distribution?.totalMessageFees ?? 0);
+  const hasAllocations = Array.isArray(messageAllocations) && messageAllocations.length > 0;
+
+  // Nonzero totalMessageFees with an empty allocation tree is invalid
+  if (totalMessageFees > 0n && !hasAllocations) {
+    throw new Error(
+      `Invalid fee parameters for ${functionName}: nonzero totalMessageFees (${totalMessageFees}) requires a non-empty messageAllocations tree.`
+    );
+  }
+
+  // If function is release, an empty allocation tree is strictly unsafe and rejected before sending
+  if (functionName === "release" && !hasAllocations) {
+    throw new Error(
+      `Fee estimation produced an unsafe empty allocation tree for transfer in release. A release transaction must cover both recipient payout and funder refund to protect against cross-boundary execution. Aborting before wallet signing.`
+    );
+  }
+
+  // If a transfer is mandatory for this call (cancel, expire, withdraw, release):
+  if (mustHaveTransfer && !hasAllocations) {
+    throw new Error(
+      `Fee estimation cannot produce a valid message allocation for transfer in ${functionName}. Aborting before wallet signing.`
+    );
+  }
+
+  if (hasAllocations) {
+    let sumBudgets = 0n;
+    const recipientsInAllocations = new Set();
+
+    for (let i = 0; i < messageAllocations.length; i++) {
+      const alloc = messageAllocations[i];
+      if (
+        !alloc ||
+        !alloc.recipient ||
+        typeof alloc.recipient !== "string" ||
+        !/^0x[0-9a-fA-F]{40}$/.test(alloc.recipient.trim())
+      ) {
+        throw new Error(`Message allocation at index ${i} has invalid recipient: ${alloc?.recipient}`);
+      }
+      recipientsInAllocations.add(alloc.recipient.trim().toLowerCase());
+      if (BigInt(alloc.budget ?? 0) <= 0n) {
+        throw new Error(`Message allocation at index ${i} has non-positive budget: ${alloc?.budget}`);
+      }
+
+      const parentIdx =
+        alloc.parentIndex !== undefined
+          ? BigInt(alloc.parentIndex)
+          : MESSAGE_ALLOCATION_ROOT_PARENT_INDEX;
+      if (parentIdx === MESSAGE_ALLOCATION_ROOT_PARENT_INDEX) {
+        sumBudgets += BigInt(alloc.budget);
+      }
+    }
+
+    if (
+      distribution?.totalMessageFees !== undefined &&
+      BigInt(distribution.totalMessageFees) !== sumBudgets
+    ) {
+      throw new Error(
+        `Distribution totalMessageFees (${distribution.totalMessageFees}) does not match sum of root message allocations (${sumBudgets})`
+      );
+    }
+
+    if (Array.isArray(expectedRecipients) && expectedRecipients.length > 0) {
+      for (const expected of expectedRecipients) {
+        const cleanExpected = String(expected || "").trim().toLowerCase();
+        if (!recipientsInAllocations.has(cleanExpected)) {
+          throw new Error(
+            `Release message allocations missing required recipient ${expected}. Both recipient payout and funder refund allocations are required to protect against cross-boundary execution. Aborting before wallet signing.`
+          );
+        }
+      }
+    }
+  }
 }

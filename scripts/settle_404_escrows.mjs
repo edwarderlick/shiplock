@@ -31,6 +31,8 @@ import {
   executeWithBaselineSnapshot,
   runInWindowCheckStep,
   queryRegistryMetadata,
+  buildReleaseMessageAllocations,
+  validateTransferAllocations,
 } from "./evidence_helper.mjs";
 
 const require = createRequire(import.meta.url);
@@ -265,13 +267,22 @@ async function main() {
         escrowId: item.id,
         record,
         submitFn: async () => {
-          const feeEst = await writeClient.estimateTransactionFeesForWrite({
-            address: CONTRACT_ADDRESS,
-            functionName: "release",
-            args: [item.id],
+          const messageAllocations = buildReleaseMessageAllocations({
+            recipient: escrow.recipient,
+            funder: escrow.funder,
+          });
+          const feeEst = await writeClient.estimateTransactionFees({
             leaderTimeunitsAllocation: 200n,
             validatorTimeunitsAllocation: 400n,
             rotations: [0n],
+            messageAllocations,
+          });
+          validateTransferAllocations({
+            functionName: "release",
+            distribution: feeEst.distribution,
+            messageAllocations: feeEst.messageAllocations,
+            mustHaveTransfer: true,
+            expectedRecipients: [escrow.recipient, escrow.funder],
           });
           return await writeClient.writeContract({
             address: CONTRACT_ADDRESS,
@@ -315,17 +326,23 @@ async function main() {
         record,
         stepKey: "postWindowSettlement",
         submitFn: async () => {
-          const feeEst = await writeClient.estimateTransactionFeesForWrite({
-            address: CONTRACT_ADDRESS,
-            functionName: "release",
-            args: [item.id],
+          const messageAllocations = buildReleaseMessageAllocations({
+            recipient: escrow.recipient,
+            funder: escrow.funder,
+          });
+          const feeEst = await writeClient.estimateTransactionFees({
             leaderTimeunitsAllocation: 200n,
             validatorTimeunitsAllocation: 400n,
             rotations: [0n],
+            messageAllocations,
           });
-          if (!feeEst.messageAllocations || feeEst.messageAllocations.length === 0) {
-            throw new Error(`Failed to estimate message allocations for post-window refund of escrow ${item.id}`);
-          }
+          validateTransferAllocations({
+            functionName: "release",
+            distribution: feeEst.distribution,
+            messageAllocations: feeEst.messageAllocations,
+            mustHaveTransfer: true,
+            expectedRecipients: [escrow.recipient, escrow.funder],
+          });
           return await writeClient.writeContract({
             address: CONTRACT_ADDRESS,
             functionName: "release",

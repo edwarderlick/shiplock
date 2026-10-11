@@ -39,6 +39,7 @@ import {
   isTemporaryNetworkOrTransportError,
   validatePhaseAllocations,
   validateTransferAllocations,
+  buildReleaseMessageAllocations,
   TRANSFER_METHODS,
   MIN_PHASE_TIMEOUT,
   MAX_PHASE_TIMEOUT
@@ -356,6 +357,15 @@ describe("ShipLock Phase 2 - Production Contract Integration & Runtime Flow", ()
       // Mock returns FINALIZED status but lacks execution confirmation
       const mockClient = {
         account: funder,
+        readContract: async () => ({
+          funder,
+          recipient,
+        }),
+        estimateTransactionFees: async () => ({
+          distribution: validDistribution,
+          feeValue: 1200n,
+          messageAllocations: buildReleaseMessageAllocations({ recipient, funder }),
+        }),
         writeContract: async () => "0xtx_missing_exec",
         getTransaction: async () => ({
           status: "FINALIZED",
@@ -387,6 +397,15 @@ describe("ShipLock Phase 2 - Production Contract Integration & Runtime Flow", ()
       // Mock returns FINALIZED status with execution revert
       const mockClient = {
         account: funder,
+        readContract: async () => ({
+          funder,
+          recipient,
+        }),
+        estimateTransactionFees: async () => ({
+          distribution: validDistribution,
+          feeValue: 1200n,
+          messageAllocations: buildReleaseMessageAllocations({ recipient, funder }),
+        }),
         writeContract: async () => "0xtx_reverted",
         getTransaction: async () => ({
           status: "FINALIZED",
@@ -932,6 +951,22 @@ describe("ShipLock Phase 2 - Production Contract Integration & Runtime Flow", ()
 
       const mockClient = {
         account: funder,
+        readContract: async () => ({
+          funder,
+          recipient,
+          amount: 1000n,
+          status: "OPEN",
+        }),
+        estimateTransactionFees: async (opts: any) => ({
+          distribution: {
+            leaderTimeunitsAllocation: opts?.leaderTimeunitsAllocation ?? 200n,
+            validatorTimeunitsAllocation: opts?.validatorTimeunitsAllocation ?? 400n,
+            totalMessageFees: 300000000000000n,
+            rotations: [0n],
+          },
+          feeValue: 300000000000000n,
+          messageAllocations: opts?.messageAllocations,
+        }),
         writeContract: async (params: any) => {
           if (params.functionName === "fund_escrow") capturedFeesFund = params.fees;
           if (params.functionName === "release") capturedFeesRelease = params.fees;
@@ -1073,6 +1108,115 @@ describe("ShipLock Phase 2 - Production Contract Integration & Runtime Flow", ()
           new RegExp(`Fee estimation cannot produce a valid message allocation for transfer in ${fn}`)
         );
       }
+    });
+
+    test("validateTransferAllocations rejects unsafe empty allocations for release", () => {
+      assert.throws(
+        () => {
+          validateTransferAllocations({
+            functionName: "release",
+            distribution: {
+              leaderTimeunitsAllocation: 200n,
+              validatorTimeunitsAllocation: 400n,
+              totalMessageFees: 0n,
+            },
+            messageAllocations: [],
+            mustHaveTransfer: true,
+          });
+        },
+        /Fee estimation produced an unsafe empty allocation tree for transfer in release/
+      );
+
+      assert.throws(
+        () => {
+          validateTransferAllocations({
+            functionName: "release",
+            distribution: {
+              leaderTimeunitsAllocation: 200n,
+              validatorTimeunitsAllocation: 400n,
+              totalMessageFees: 0n,
+            },
+            messageAllocations: undefined,
+            mustHaveTransfer: true,
+          });
+        },
+        /Fee estimation produced an unsafe empty allocation tree for transfer in release/
+      );
+    });
+
+    test("validateTransferAllocations rejects release allocations missing recipient or funder", () => {
+      const recipientOnly = [
+        {
+          messageType: 0,
+          recipient: recipient,
+          budget: 150000000000000n,
+        },
+      ];
+
+      assert.throws(
+        () => {
+          validateTransferAllocations({
+            functionName: "release",
+            distribution: {
+              leaderTimeunitsAllocation: 200n,
+              validatorTimeunitsAllocation: 400n,
+              totalMessageFees: 150000000000000n,
+            },
+            messageAllocations: recipientOnly,
+            mustHaveTransfer: true,
+            expectedRecipients: [recipient, funder],
+          });
+        },
+        new RegExp(`Release message allocations missing required recipient ${funder}`)
+      );
+
+      const funderOnly = [
+        {
+          messageType: 0,
+          recipient: funder,
+          budget: 150000000000000n,
+        },
+      ];
+
+      assert.throws(
+        () => {
+          validateTransferAllocations({
+            functionName: "release",
+            distribution: {
+              leaderTimeunitsAllocation: 200n,
+              validatorTimeunitsAllocation: 400n,
+              totalMessageFees: 150000000000000n,
+            },
+            messageAllocations: funderOnly,
+            mustHaveTransfer: true,
+            expectedRecipients: [recipient, funder],
+          });
+        },
+        new RegExp(`Release message allocations missing required recipient ${recipient}`)
+      );
+    });
+
+    test("buildReleaseMessageAllocations constructs valid allocation tree covering recipient and funder", () => {
+      const allocs = buildReleaseMessageAllocations({ recipient, funder });
+      assert.equal(allocs.length, 2);
+      assert.equal(allocs[0].recipient.toLowerCase(), recipient.toLowerCase());
+      assert.equal(allocs[1].recipient.toLowerCase(), funder.toLowerCase());
+      assert.equal(allocs[0].budget, 150000000000000n);
+      assert.equal(allocs[1].budget, 150000000000000n);
+
+      assert.doesNotThrow(() => {
+        validateTransferAllocations({
+          functionName: "release",
+          distribution: {
+            leaderTimeunitsAllocation: 200n,
+            validatorTimeunitsAllocation: 400n,
+            totalMessageFees: 300000000000000n,
+          },
+          messageAllocations: allocs,
+          mustHaveTransfer: true,
+          expectedRecipients: [recipient, funder],
+        });
+      });
     });
 
     test("validateTransferAllocations validates recipient format and positive budget", () => {
@@ -1226,33 +1370,54 @@ describe("ShipLock Phase 2 - Production Contract Integration & Runtime Flow", ()
       assert.equal(capturedFees.distribution.totalMessageFees, 150000000000000n);
     });
 
-    test("writeIc preserves and passes messageAllocations to writeContract for recipient payout (release)", async () => {
+    test("writeIc cross-boundary release: simulation observes EARLY_404_RETRYABLE with 0 messages, but writeIc submits complete allocations covering recipient and funder, executing refund without Mode 1 failure", async () => {
       let capturedFees: any = null;
-      const expectedAllocations = [
-        {
-          messageType: 0,
-          recipient: recipient,
-          callKey: "0x0000000000000000000000000000000000000000000000000000000000000000",
-          budget: 150000000000000n,
-          feeParams: "0x01",
-        },
-      ];
+      let writeContractCalled = false;
 
       const mockClient = {
         account: funder,
+        readContract: async ({ functionName }: any) => {
+          if (functionName === "get_escrow") {
+            return {
+              id: escrowId,
+              funder,
+              recipient,
+              amount: 10000000000000000n,
+              status: "OPEN",
+              match_reason: "LOOKBACK_404_OK",
+            };
+          }
+          return null;
+        },
+        // Pre-submit simulation observes in-window 404 branch -> 0 messages emitted!
         estimateTransactionFeesForWrite: async () => ({
           distribution: {
             leaderTimeunitsAllocation: 200n,
             validatorTimeunitsAllocation: 400n,
-            totalMessageFees: 150000000000000n,
+            totalMessageFees: 0n,
             rotations: [0n],
           },
-          feeValue: 300000000000000n,
-          messageAllocations: expectedAllocations,
+          feeValue: 25000000000005176n,
+          messageAllocations: [], // Empty allocations from simulation!
         }),
+        // writeIc must NOT accept that empty quote; it estimates complete allocations covering both parties
+        estimateTransactionFees: async (opts: any) => {
+          assert.ok(opts.messageAllocations?.length >= 2, "Authoritative estimate must receive complete allocations");
+          return {
+            distribution: {
+              leaderTimeunitsAllocation: opts.leaderTimeunitsAllocation ?? 200n,
+              validatorTimeunitsAllocation: opts.validatorTimeunitsAllocation ?? 400n,
+              totalMessageFees: 300000000000000n,
+              rotations: [0n],
+            },
+            feeValue: 25302500000005176n,
+            messageAllocations: opts.messageAllocations,
+          };
+        },
         writeContract: async (params: any) => {
+          writeContractCalled = true;
           capturedFees = params.fees;
-          return "0xtx_release_payout_success";
+          return "0xtx_cross_boundary_refund";
         },
         getTransaction: async () => ({
           status: "FINALIZED",
@@ -1261,7 +1426,7 @@ describe("ShipLock Phase 2 - Production Contract Integration & Runtime Flow", ()
         }),
       };
 
-      await writeIc({
+      const res = await writeIc({
         account: funder,
         provider: mockProvider,
         functionName: "release",
@@ -1269,39 +1434,41 @@ describe("ShipLock Phase 2 - Production Contract Integration & Runtime Flow", ()
         client: mockClient,
       });
 
+      assert.equal(writeContractCalled, true);
+      assert.equal(res.txId, "0xtx_cross_boundary_refund");
       assert.ok(capturedFees);
       assert.ok(capturedFees.messageAllocations);
-      assert.equal(capturedFees.messageAllocations[0].recipient, recipient);
-      assert.equal(capturedFees.messageAllocations[0].budget, 150000000000000n);
+      assert.equal(capturedFees.messageAllocations.length, 2);
+      assert.equal(capturedFees.messageAllocations[0].recipient.toLowerCase(), recipient.toLowerCase());
+      assert.equal(capturedFees.messageAllocations[1].recipient.toLowerCase(), funder.toLowerCase());
+      assert.equal(capturedFees.distribution.totalMessageFees, 300000000000000n);
     });
 
-    test("writeIc preserves and passes messageAllocations to writeContract for final refund (release post-window)", async () => {
+    test("writeIc normal early 404: submits complete allocations, transaction finalizes as OPEN with EARLY_404_RETRYABLE", async () => {
       let capturedFees: any = null;
-      const expectedAllocations = [
-        {
-          messageType: 0,
-          recipient: funder,
-          callKey: "0x0000000000000000000000000000000000000000000000000000000000000000",
-          budget: 150000000000000n,
-          feeParams: "0x01",
-        },
-      ];
-
       const mockClient = {
-        account: "0x3333333333333333333333333333333333333333",
-        estimateTransactionFeesForWrite: async () => ({
+        account: funder,
+        readContract: async () => ({
+          id: escrowId,
+          funder,
+          recipient,
+          amount: 10000000000000000n,
+          status: "OPEN",
+          match_reason: "LOOKBACK_404_OK",
+        }),
+        estimateTransactionFees: async (opts: any) => ({
           distribution: {
             leaderTimeunitsAllocation: 200n,
             validatorTimeunitsAllocation: 400n,
-            totalMessageFees: 150000000000000n,
+            totalMessageFees: 300000000000000n,
             rotations: [0n],
           },
-          feeValue: 300000000000000n,
-          messageAllocations: expectedAllocations,
+          feeValue: 25302500000005176n,
+          messageAllocations: opts.messageAllocations,
         }),
         writeContract: async (params: any) => {
           capturedFees = params.fees;
-          return "0xtx_final_refund_success";
+          return "0xtx_early_404_open";
         },
         getTransaction: async () => ({
           status: "FINALIZED",
@@ -1310,17 +1477,65 @@ describe("ShipLock Phase 2 - Production Contract Integration & Runtime Flow", ()
         }),
       };
 
-      await writeIc({
-        account: "0x3333333333333333333333333333333333333333",
+      const res = await writeIc({
+        account: funder,
         provider: mockProvider,
         functionName: "release",
         args: [escrowId],
         client: mockClient,
       });
 
-      assert.ok(capturedFees);
-      assert.ok(capturedFees.messageAllocations);
-      assert.equal(capturedFees.messageAllocations[0].recipient, funder);
+      assert.equal(res.txId, "0xtx_early_404_open");
+      assert.equal(capturedFees.messageAllocations.length, 2);
+      assert.equal(capturedFees.messageAllocations[0].recipient.toLowerCase(), recipient.toLowerCase());
+      assert.equal(capturedFees.messageAllocations[1].recipient.toLowerCase(), funder.toLowerCase());
+    });
+
+    test("writeIc successful recipient payout: submits complete allocations, transaction finalizes as RELEASED", async () => {
+      let capturedFees: any = null;
+      const mockClient = {
+        account: funder,
+        readContract: async () => ({
+          id: escrowId,
+          funder,
+          recipient,
+          amount: 10000000000000000n,
+          status: "OPEN",
+          match_reason: "LOOKBACK_404_OK",
+        }),
+        estimateTransactionFees: async (opts: any) => ({
+          distribution: {
+            leaderTimeunitsAllocation: 200n,
+            validatorTimeunitsAllocation: 400n,
+            totalMessageFees: 300000000000000n,
+            rotations: [0n],
+          },
+          feeValue: 25302500000005176n,
+          messageAllocations: opts.messageAllocations,
+        }),
+        writeContract: async (params: any) => {
+          capturedFees = params.fees;
+          return "0xtx_release_payout";
+        },
+        getTransaction: async () => ({
+          status: "FINALIZED",
+          statusName: "FINALIZED",
+          txExecutionResultName: "FINISHED_WITH_RETURN",
+        }),
+      };
+
+      const res = await writeIc({
+        account: funder,
+        provider: mockProvider,
+        functionName: "release",
+        args: [escrowId],
+        client: mockClient,
+      });
+
+      assert.equal(res.txId, "0xtx_release_payout");
+      assert.equal(capturedFees.messageAllocations.length, 2);
+      assert.equal(capturedFees.messageAllocations[0].recipient.toLowerCase(), recipient.toLowerCase());
+      assert.equal(capturedFees.messageAllocations[1].recipient.toLowerCase(), funder.toLowerCase());
     });
 
     test("writeIc preserves and passes messageAllocations to writeContract for expire (refund to funder)", async () => {
@@ -1477,44 +1692,43 @@ describe("ShipLock Phase 2 - Production Contract Integration & Runtime Flow", ()
       assert.equal(capturedParams.fees.distribution.totalMessageFees, 150000000000000n);
     });
 
-    test("evidence runners: release candidate payout submitFn receives and passes messageAllocations", async () => {
+    test("evidence runners: release candidate payout submitFn builds complete [recipient, funder] allocations", async () => {
       let capturedParams: any = null;
-      const expectedAllocations = [
-        {
-          messageType: 0,
-          recipient: recipient,
-          callKey: "0x0000000000000000000000000000000000000000000000000000000000000000",
-          budget: 150000000000000n,
-          feeParams: "0x01",
-        },
-      ];
 
       const mockRunnerClient = {
-        estimateTransactionFeesForWrite: async () => ({
-          distribution: {
-            leaderTimeunitsAllocation: 200n,
-            validatorTimeunitsAllocation: 400n,
-            totalMessageFees: 150000000000000n,
-            rotations: [0n],
-          },
-          feeValue: 300000000000000n,
-          messageAllocations: expectedAllocations,
-        }),
+        estimateTransactionFees: async (opts: any) => {
+          assert.equal(opts.messageAllocations.length, 2);
+          return {
+            distribution: {
+              leaderTimeunitsAllocation: 200n,
+              validatorTimeunitsAllocation: 400n,
+              totalMessageFees: 300000000000000n,
+              rotations: [0n],
+            },
+            feeValue: 300000000000000n,
+            messageAllocations: opts.messageAllocations,
+          };
+        },
         writeContract: async (params: any) => {
           capturedParams = params;
           return "0xtx_runner_release_cand";
         },
       };
 
-      const feeEst = await mockRunnerClient.estimateTransactionFeesForWrite({
-        address: CONTRACT_ADDRESS,
-        functionName: "release",
-        args: [escrowId],
+      const messageAllocations = buildReleaseMessageAllocations({ recipient, funder });
+      const feeEst = await mockRunnerClient.estimateTransactionFees({
         leaderTimeunitsAllocation: 200n,
         validatorTimeunitsAllocation: 400n,
         rotations: [0n],
+        messageAllocations,
       });
-      assert.ok(feeEst.messageAllocations?.length > 0);
+      validateTransferAllocations({
+        functionName: "release",
+        distribution: feeEst.distribution,
+        messageAllocations: feeEst.messageAllocations,
+        mustHaveTransfer: true,
+        expectedRecipients: [recipient, funder],
+      });
 
       const txHash = await mockRunnerClient.writeContract({
         address: CONTRACT_ADDRESS,
@@ -1529,47 +1743,48 @@ describe("ShipLock Phase 2 - Production Contract Integration & Runtime Flow", ()
 
       assert.equal(txHash, "0xtx_runner_release_cand");
       assert.ok(capturedParams.fees.messageAllocations);
-      assert.equal(capturedParams.fees.messageAllocations[0].recipient, recipient);
+      assert.equal(capturedParams.fees.messageAllocations.length, 2);
+      assert.equal(capturedParams.fees.messageAllocations[0].recipient.toLowerCase(), recipient.toLowerCase());
+      assert.equal(capturedParams.fees.messageAllocations[1].recipient.toLowerCase(), funder.toLowerCase());
     });
 
-    test("evidence runners: post-window refund submitFn receives and passes messageAllocations", async () => {
+    test("evidence runners: post-window refund submitFn builds complete [recipient, funder] allocations", async () => {
       let capturedParams: any = null;
-      const expectedAllocations = [
-        {
-          messageType: 0,
-          recipient: funder,
-          callKey: "0x0000000000000000000000000000000000000000000000000000000000000000",
-          budget: 150000000000000n,
-          feeParams: "0x01",
-        },
-      ];
 
       const mockRunnerClient = {
-        estimateTransactionFeesForWrite: async () => ({
-          distribution: {
-            leaderTimeunitsAllocation: 200n,
-            validatorTimeunitsAllocation: 400n,
-            totalMessageFees: 150000000000000n,
-            rotations: [0n],
-          },
-          feeValue: 300000000000000n,
-          messageAllocations: expectedAllocations,
-        }),
+        estimateTransactionFees: async (opts: any) => {
+          assert.equal(opts.messageAllocations.length, 2);
+          return {
+            distribution: {
+              leaderTimeunitsAllocation: 200n,
+              validatorTimeunitsAllocation: 400n,
+              totalMessageFees: 300000000000000n,
+              rotations: [0n],
+            },
+            feeValue: 300000000000000n,
+            messageAllocations: opts.messageAllocations,
+          };
+        },
         writeContract: async (params: any) => {
           capturedParams = params;
           return "0xtx_runner_post_refund";
         },
       };
 
-      const feeEst = await mockRunnerClient.estimateTransactionFeesForWrite({
-        address: CONTRACT_ADDRESS,
-        functionName: "release",
-        args: [escrowId],
+      const messageAllocations = buildReleaseMessageAllocations({ recipient, funder });
+      const feeEst = await mockRunnerClient.estimateTransactionFees({
         leaderTimeunitsAllocation: 200n,
         validatorTimeunitsAllocation: 400n,
         rotations: [0n],
+        messageAllocations,
       });
-      assert.ok(feeEst.messageAllocations?.length > 0);
+      validateTransferAllocations({
+        functionName: "release",
+        distribution: feeEst.distribution,
+        messageAllocations: feeEst.messageAllocations,
+        mustHaveTransfer: true,
+        expectedRecipients: [recipient, funder],
+      });
 
       const txHash = await mockRunnerClient.writeContract({
         address: CONTRACT_ADDRESS,
@@ -1584,7 +1799,9 @@ describe("ShipLock Phase 2 - Production Contract Integration & Runtime Flow", ()
 
       assert.equal(txHash, "0xtx_runner_post_refund");
       assert.ok(capturedParams.fees.messageAllocations);
-      assert.equal(capturedParams.fees.messageAllocations[0].recipient, funder);
+      assert.equal(capturedParams.fees.messageAllocations.length, 2);
+      assert.equal(capturedParams.fees.messageAllocations[0].recipient.toLowerCase(), recipient.toLowerCase());
+      assert.equal(capturedParams.fees.messageAllocations[1].recipient.toLowerCase(), funder.toLowerCase());
     });
   });
 });
