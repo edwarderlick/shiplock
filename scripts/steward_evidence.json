@@ -125,8 +125,37 @@
       "timeRemainingHours": "24.52"
     }
   ],
+  "liveFundingProof": {
+    "role": "live_funding_proof",
+    "verified": true,
+    "template": "PYPI_VERSION",
+    "package": "shiplock-live-verify-phase",
+    "version": "1.0.0",
+    "id": "0x632b64ce06e117d2dc11da291e031f82844fa29d25e841b95f4f33734b30270c",
+    "txHash": "0xd6f0881c7ac0a3d6f30306e54cc46136c10d3b1a43c46e1c92ab8793e8f55190",
+    "explorerTxUrl": "https://explorer-studio-dev.genlayer.com/tx/0xd6f0881c7ac0a3d6f30306e54cc46136c10d3b1a43c46e1c92ab8793e8f55190",
+    "explorerContractUrl": "https://explorer-studio-dev.genlayer.com/address/0x7Cef756668Cd925807e8B110D0330643c6F809E3",
+    "fundedAmountWei": "10000000000000000",
+    "funder": "0x20E850BAaD26d763d4f691780D1BEBA01c8D6084",
+    "recipient": "0x0f907a2598AEF71B988f9208103066586A1a4aF0",
+    "windowStartUtc": "2026-10-12T15:37:50Z",
+    "windowEndUtc": "2026-10-14T15:37:50Z",
+    "status": "OPEN",
+    "matchReason": "LOOKBACK_404_OK",
+    "createdAtUtc": "2026-10-11T13:37:54Z"
+  },
+  "feeFixVerification": {
+    "failedTxHash": "0xb8683c030c53bee50cabcacfb1c3d5263b7946bc061d317222c40581a335a9a3",
+    "failedTxReceiptStatus": "0x0",
+    "failedTxRevertReason": "PhaseTimeoutOutOfBounds(800,30,600)",
+    "escrowCreated": false,
+    "principalLocked": false,
+    "fixCommit": "c2d061b9f564da6dd4d98fe24a6d4df5b2d73f1a",
+    "vercelDeploymentId": "dpl_9p3KJWhp8VcXyBzeV1hytLAeTibA",
+    "productionUrl": "https://shiplock-chi.vercel.app/"
+  },
   "economics": {
-    "escrowedOpenWei": "60000000000000000",
+    "escrowedOpenWei": "70000000000000000",
     "outstandingCreditsWei": "0",
     "paidToRecipientsWei": "0",
     "refundedToFundersWei": "10000000000000000",

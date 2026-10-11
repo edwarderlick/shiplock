@@ -24,11 +24,12 @@ ShipLock is an immutable, time-gated package publication escrow deployed to GenL
 
 ### Live On-Chain Economics (`get_economics()`)
 Snapshot read directly from contract `0x7Cef756668Cd925807e8B110D0330643c6F809E3`:
-- **`escrowed_open`**: `0.06 GEN` (`60000000000000000 wei`)
-  - PyPI 404 Smoke Escrow: `0.02 GEN`
-  - npm 404 Smoke Escrow: `0.02 GEN`
-  - PyPI Release Candidate Escrow: `0.01 GEN`
-  - npm Release Candidate Escrow: `0.01 GEN`
+- **`escrowed_open`**: `0.07 GEN` (`70000000000000000 wei`)
+  - PyPI 404 Smoke Escrow: `0.02 GEN` (`0x1ac2eea7...`)
+  - npm 404 Smoke Escrow: `0.02 GEN` (`0x6a335be1...`)
+  - PyPI Release Candidate Escrow: `0.01 GEN` (`0xdc2dfac8...`)
+  - npm Release Candidate Escrow: `0.01 GEN` (`0x3c46e617...`)
+  - Live Funding Proof Escrow: `0.01 GEN` (`0x632b64ce...`)
 - **`refunded_to_funders`**: `0.01 GEN` (`10000000000000000 wei` from canceled escrow `0xd450d74c...`)
 - **`paid_to_recipients`**: `0.00 GEN`
 - **`outstanding_credits`**: `0.00 GEN`
@@ -48,8 +49,38 @@ The following transactions and escrows have been audited against scripts and ver
 | **Canceled Smoke** | `shiplock-smoke-cancel-target` @ `0.0.0-smoke.1` | `0xd450d74c9eee0d8ff4d92983bfc79ee55f01ef3609c4e6d0dd5fcb0c8867c2a3` | Fund: [`0x2ce8683d...`](https://explorer-studio-dev.genlayer.com/tx/0x2ce8683d5762d9b322b1a91ef0f1bc4f70cdbfabb4267a42a6e26f47951c640e)<br>Cancel: [`0xdb6d919c...`](https://explorer-studio-dev.genlayer.com/tx/0xdb6d919c7b4462d479917e8df1783a6a087053c80e24bf5bce2600f0fc56ab4e) | `CANCELED` (0.01 GEN native refunded to funder via `emit_transfer`) |
 | **PyPI Release Cand.** | `shiplock-steward-release-live` @ `1.0.0` | `0xdc2dfac88f9a7dbc2615c3a2338cd12819efca660352c1d1c8b6f530ed5f9c1a` | Fund: [`0x0f09d238...`](https://explorer-studio-dev.genlayer.com/tx/0x0f09d23831be1fb344b135c09cb674529e4caa5c607fe665988b5da80d342cc6) | `OPEN` (0.01 GEN locked, `LOOKBACK_404_OK`) |
 | **npm Release Cand.** | `shiplock-steward-release-live` @ `1.0.0` | `0x3c46e617d6541f63e69f783c0a481f429bb9c7e08509274ebbef25fc1b8444ad` | Fund: [`0xb627438c...`](https://explorer-studio-dev.genlayer.com/tx/0xb627438c2bb6190960b9eea4c4acb8f09847e14aa02e0b4b219056437bd30a01) | `OPEN` (0.01 GEN locked, `LOOKBACK_404_OK`) |
+| **Live Funding Proof** | `shiplock-live-verify-phase` @ `1.0.0` | `0x632b64ce06e117d2dc11da291e031f82844fa29d25e841b95f4f33734b30270c` | Fund: [`0xd6f0881c...`](https://explorer-studio-dev.genlayer.com/tx/0xd6f0881c7ac0a3d6f30306e54cc46136c10d3b1a43c46e1c92ab8793e8f55190) | `OPEN` (0.01 GEN locked, `LOOKBACK_404_OK`, economics increased from 0.06 to 0.07 GEN) |
 
 *Correction Note*: The canceled escrow ID was verified on-chain as `0xd450d74c9eee0d8ff4d92983bfc79ee55f01ef3609c4e6d0dd5fcb0c8867c2a3` (correcting a prior documentation typo).
+
+### Fee Configuration Fix & Live Funding Verification Record
+
+1. **Failed Transaction Inspection (`PhaseTimeoutOutOfBounds`)**:
+   - **Transaction Hash**: [`0xb8683c030c53bee50cabcacfb1c3d5263b7946bc061d317222c40581a335a9a3`](https://explorer-studio-dev.genlayer.com/tx/0xb8683c030c53bee50cabcacfb1c3d5263b7946bc061d317222c40581a335a9a3)
+   - **Receipt Status**: `0x0`
+   - **Revert Reason**: `PhaseTimeoutOutOfBounds(800,30,600)`
+   - **Verification Finding**: Reverted at consensus level due to `validatorTimeunitsAllocation: "800"` exceeding the Studio Next 600 timeunit limit. Independently confirmed via `list_ids()` and `get_economics()` that **no escrow was created and zero principal was locked** by this transaction.
+
+2. **Fee Profile Fix & Client Validation**:
+   - **Commit SHA**: [`c2d061b`](https://github.com/edwarderlick/shiplock/commit/c2d061b) (verified on `origin/main`).
+   - **Profiles Updated**: Both `fee-profile.json` and `web/src/fee-profile.json` corrected `fund_escrow` and `release` to `leaderTimeunitsAllocation: "200"` and `validatorTimeunitsAllocation: "400"`.
+   - **Validation Enforced**: `web/src/lib/write.ts` enforces `validatePhaseAllocations` ensuring leader and validator allocations are strictly within `[30, 600]` before wallet signing and transaction submission across both Transaction Kit and fallback paths.
+   - **Production Deployment**: Vercel Deployment ID `dpl_9p3KJWhp8VcXyBzeV1hytLAeTibA` ([https://shiplock-chi.vercel.app/](https://shiplock-chi.vercel.app/)), verified serving the 200/400 fee profile and bounds checks in production chunk `3qqakkib_nbz7.js`.
+
+3. **Live Funding Proof**:
+   - **Role**: **Live Funding Proof** (Explicitly labeled Live Funding Proof; NOT early 404, successful release, or refund proof).
+   - **Transaction Hash**: [`0xd6f0881c7ac0a3d6f30306e54cc46136c10d3b1a43c46e1c92ab8793e8f55190`](https://explorer-studio-dev.genlayer.com/tx/0xd6f0881c7ac0a3d6f30306e54cc46136c10d3b1a43c46e1c92ab8793e8f55190)
+   - **Transaction Status**: `FINALIZED`
+   - **Execution Result**: `FINISHED_WITH_RETURN`
+   - **Active Contract**: [`0x7Cef756668Cd925807e8B110D0330643c6F809E3`](https://explorer-studio-dev.genlayer.com/address/0x7Cef756668Cd925807e8B110D0330643c6F809E3)
+   - **Escrow ID**: `0x632b64ce06e117d2dc11da291e031f82844fa29d25e841b95f4f33734b30270c`
+   - **Template & Package**: `PYPI_VERSION`, `shiplock-live-verify-phase` @ `1.0.0`
+   - **Nonce**: `5001`
+   - **Recipient**: `0x0f907a2598AEF71B988f9208103066586A1a4aF0`
+   - **Execution Window**: `2026-10-12T15:37:50Z` $\rightarrow$ `2026-10-14T15:37:50Z`
+   - **On-Chain Escrow Status**: `OPEN` (`LOOKBACK_404_OK`)
+   - **Principal Locked**: `0.01 GEN` (`10000000000000000 wei`)
+   - **Economics Delta**: `escrowed_open` increased from `0.06 GEN` (`60000000000000000 wei`) to `0.07 GEN` (`70000000000000000 wei`). All other economics categories unchanged.
 
 ---
 
@@ -177,7 +208,7 @@ Registry credentials must never be passed in command arguments, chat, logs, or c
 | `python -m pytest tests/direct -q` | Direct contract unit tests | **35 passed** |
 | `python -m pytest tests/test_deployer_keystore.py -v` | Keystore & address preservation | **13 passed** |
 | `node --test tests/test_evidence_harness.mjs` | PyPI urls parsing, fail-closed candidate release, baseline snapshots, recovery, strict early 404 retryable, temporary failure attempt history & retry lifecycle, distinct early-404 vs refund settlement flags, on-chain cross-boundary refund settlement | **27 passed** |
-| `npm --prefix web test` | Frontend flow & contract runtime tests | **45 passed** |
+| `npm --prefix web test` | Frontend flow & contract runtime tests (including 6 phase timeout & fee bounds tests) | **51 passed** |
 | `npm --prefix web run lint` | ESLint static analysis | **0 errors** |
 | `npm --prefix web run build` | Next.js production build | **Compiled successfully** |
 | `https://shiplock-chi.vercel.app/` | Live Vercel production deployment | **Verified live** |
