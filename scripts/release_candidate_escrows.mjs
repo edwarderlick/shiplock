@@ -8,19 +8,13 @@
  * - End:    window_end_utc (publication deadline)
  * - Expire: expire_at_utc = window_end_utc + 7 days
  *
- * Key contract behavior:
- * - A version published INSIDE [window_start, window_end] can be released to recipient
- *   ANY TIME while window_start <= now < expire_at (even after window_end has passed)!
- *
- * Guarantees:
- * 1. Checks exact PyPI / npm version endpoints live via HTTP and records response & publish timestamp.
- * 2. Never submits release before window_start.
- * 3. Persists transaction hash immediately before waiting.
- * 4. Reconciles existing pending transactions upon rerun.
- * 5. Requires FINALIZED status and FINISHED_WITH_RETURN execution result.
- * 6. Verifies post-state on-chain: status RELEASED, match_reason 200_IN_WINDOW, exact payout to recipient.
- * 7. Verifies before/after on-chain economics deltas.
- * 8. Writes evidence atomically via temp file rename.
+ * Requirements:
+ * 1. Reconcile any pending transaction before applying current registry or time gates.
+ * 2. Submit only when the exact version has trustworthy evidence of publication inside the escrow window and is not yanked.
+ * 3. For missing, inconclusive, yanked, or out-of-window evidence, record the finding and stop without a write.
+ * 4. Persist the pre-transaction escrow/economics baseline snapshot before submitting and alongside the pending hash.
+ * 5. On restart, reconcile that same baseline with the finalized transaction and post-state.
+ * 6. Never set verified=true unless finalized execution, RELEASED/200_IN_WINDOW, exact payout, and economics all pass.
  */
 
 import { createRequire } from "node:module";
@@ -29,9 +23,10 @@ import { homedir } from "node:os";
 import {
   atomicWriteJson,
   readJsonSafe,
-  executeWithPendingRecovery,
-  verifyEconomicsDelta,
+  reconcilePendingTransaction,
+  executeWithBaselineSnapshot,
   queryRegistryMetadata,
+  parseUtcIso,
 } from "./evidence_helper.mjs";
 
 const require = createRequire(import.meta.url);
@@ -78,6 +73,37 @@ async function main() {
 
   for (const cand of candidates) {
     console.log(`\n--- Candidate: ${cand.target} - ${cand.package}@${cand.version} (ID: ${cand.id.slice(0, 10)}...) ---`);
+
+    // 1. RECONCILE PENDING TRANSACTION FIRST (before registry checks or time gates)
+    if (cand.releaseAttempt?.txHash && !cand.releaseAttempt?.verified) {
+      console.log(`  [🔍 RECOVERY] Found unverified pending release attempt (${cand.releaseAttempt.txHash}). Reconciling baseline...`);
+      await reconcilePendingTransaction({
+        client: readClient,
+        contractAddress: CONTRACT_ADDRESS,
+        escrowId: cand.id,
+        record: cand,
+        stepKey: "releaseAttempt",
+        expectedEscrowStatus: "RELEASED",
+        expectedMatchReason: "200_IN_WINDOW",
+        expectedEconomicsDelta: "PAYOUT",
+        amountWei: cand.fundedAmountWei,
+        saveEvidence,
+      });
+      console.log(`  [✓] Successfully reconciled candidate release attempt.`);
+    }
+
+    if (cand.releaseAttempt?.verified) {
+      console.log(`  [✓] Release attempt already verified for this candidate.`);
+      cand.finalState = {
+        status: "RELEASED",
+        settled: true,
+        matchReason: "200_IN_WINDOW",
+        recipientPayoutWei: cand.fundedAmountWei,
+      };
+      saveEvidence();
+      continue;
+    }
+
     const escrow = await readClient.readContract({
       address: CONTRACT_ADDRESS,
       functionName: "get_escrow",
@@ -112,7 +138,7 @@ async function main() {
       continue;
     }
 
-    // Live HTTP check of the official registry endpoint
+    // 2. LIVE HTTP CHECK OF OFFICIAL REGISTRY ENDPOINT
     console.log(`  [*] Querying official registry endpoint for ${cand.package}@${cand.version}...`);
     const regCheck = await queryRegistryMetadata(cand.template, cand.package, cand.version);
     console.log(`      Registry Check: ${regCheck.summary} (HTTP ${regCheck.statusCode})`);
@@ -123,6 +149,7 @@ async function main() {
     };
     saveEvidence();
 
+    // 3. TIME GATE: PRE-WINDOW CHECK
     if (now < start) {
       const hoursLeft = ((start.getTime() - now.getTime()) / (3600 * 1000)).toFixed(2);
       console.log(`  [🔒 TIME-GATED] Window opens in ${hoursLeft} hours (${startStr}).`);
@@ -133,56 +160,82 @@ async function main() {
       continue;
     }
 
+    // 4. TIME GATE: EXPIRED CHECK
     if (now >= expire) {
       console.log(`  [!] Expire instant passed (${expStr}). Escrow can no longer be released to recipient.`);
       cand.currentStatus = "EXPIRED";
+      cand.finding = `Escrow expired at ${expStr}`;
       saveEvidence();
       continue;
     }
 
-    // Inside valid release window: start <= now < expire
-    if (!regCheck.exists) {
-      console.log(`  [⏳ WAITING PUBLICATION] Artifact is not yet published on ${cand.target}.`);
-      if (now < end) {
-        const hoursUntilEnd = ((end.getTime() - now.getTime()) / (3600 * 1000)).toFixed(2);
-        console.log(`      Publication window remains open for ${hoursUntilEnd} more hours.`);
-        console.log(`      Must publish before ${endStr} to achieve RELEASED state.`);
-      } else {
-        console.log(`      Publication window closed at ${endStr}. Submitting release now will result in REFUND_NOHIT.`);
-      }
+    // 5. REGISTRY EVIDENCE VALIDATION:
+    // Submit only when the exact version has trustworthy evidence of publication inside the escrow window and is not yanked.
+    // For missing, inconclusive, yanked, or out-of-window evidence, record the finding and stop without a write.
+
+    // A. MISSING EVIDENCE
+    if (!regCheck.exists || regCheck.statusCode === 404) {
+      console.log(`  [⏳ WAITING PUBLICATION] Artifact is not yet published on ${cand.target} (HTTP 404). Stopping without write.`);
+      cand.currentStatus = "AWAITING_PUBLICATION";
+      cand.finding = "Missing: package or version not found on registry (HTTP 404)";
+      saveEvidence();
       continue;
     }
 
-    // Artifact exists on registry! Validate publication timestamp
-    const pubDt = regCheck.publishTime ? new Date(regCheck.publishTime) : null;
-    console.log(`  [✓] Artifact published at ${regCheck.publishTime}.`);
-
-    const isInsideWindow = pubDt && pubDt >= start && pubDt <= end;
-    if (isInsideWindow) {
-      console.log(`  [🎯 QUALIFIED RELEASE] publish_time is inside [start, end]! Proceeding with release write...`);
-    } else {
-      console.log(`  [⚠️ OUT-OF-WINDOW] publish_time (${regCheck.publishTime}) is outside window. Proceeding will trigger REFUND_NOHIT.`);
-    }
-
-    if (cand.releaseAttempt?.verified) {
-      console.log(`  [✓] Release attempt already verified for this candidate.`);
+    // B. INCONCLUSIVE EVIDENCE
+    if (regCheck.kind !== "200") {
+      console.log(`  [⚠️ INCONCLUSIVE] Registry response lacks reliable publication evidence (${regCheck.kind}): ${regCheck.error || regCheck.summary}. Stopping without write.`);
+      cand.currentStatus = "REGISTRY_INCONCLUSIVE";
+      cand.finding = `Inconclusive registry response (${regCheck.kind}): ${regCheck.error || regCheck.summary}`;
+      saveEvidence();
       continue;
     }
 
+    // C. YANKED EVIDENCE
+    if (regCheck.isYanked) {
+      console.log(`  [⚠️ YANKED] Exact version is marked yanked on ${cand.target}. Stopping without write.`);
+      cand.currentStatus = "YANKED";
+      cand.finding = `Version is yanked on registry (${regCheck.yankedReason || "yanked"})`;
+      saveEvidence();
+      continue;
+    }
+
+    // D. PUBLICATION TIMESTAMP PARSING & WINDOW VALIDATION
+    let pubDt = null;
+    try {
+      pubDt = regCheck.publishTime ? parseUtcIso(regCheck.publishTime) : null;
+    } catch {
+      pubDt = null;
+    }
+
+    if (!pubDt) {
+      console.log(`  [⚠️ INCONCLUSIVE] Could not parse publication timestamp (${regCheck.publishTime}). Stopping without write.`);
+      cand.currentStatus = "REGISTRY_INCONCLUSIVE";
+      cand.finding = `Unparseable publication timestamp: ${regCheck.publishTime}`;
+      saveEvidence();
+      continue;
+    }
+
+    if (pubDt < start || pubDt > end) {
+      console.log(`  [⚠️ OUT-OF-WINDOW] Publication timestamp (${regCheck.publishTime}) is outside window [${startStr}, ${endStr}]. Stopping without write.`);
+      cand.currentStatus = "OUT_OF_WINDOW";
+      cand.finding = `Publication timestamp (${regCheck.publishTime}) is outside escrow window [${startStr}, ${endStr}]`;
+      saveEvidence();
+      continue;
+    }
+
+    // 6. TRUSTWORTHY PUBLICATION INSIDE WINDOW CONFIRMED:
+    // Execute write transaction with pre-transaction baseline snapshot persistence and fail-closed checks.
+    console.log(`  [🎯 TRUSTWORTHY EVIDENCE] Valid non-yanked publication inside window at ${regCheck.publishTime}.`);
     const caller = await getCallerAccount();
     const writeClient = createClient({ chain: studioDevnet, account: caller });
 
-    const econBefore = await readClient.readContract({
-      address: CONTRACT_ADDRESS,
-      functionName: "get_economics",
-      args: [],
-    });
-
-    const { txHash, txInfo } = await executeWithPendingRecovery({
+    await executeWithBaselineSnapshot({
       client: readClient,
+      contractAddress: CONTRACT_ADDRESS,
+      escrowId: cand.id,
       record: cand,
       stepKey: "releaseAttempt",
-      saveEvidence,
       submitFn: async () => {
         const feeEst = await writeClient.estimateTransactionFees({
           leaderTimeunitsAllocation: 150n,
@@ -199,62 +252,29 @@ async function main() {
           },
         });
       },
+      expectedEscrowStatus: "RELEASED",
+      expectedMatchReason: "200_IN_WINDOW",
+      expectedEconomicsDelta: "PAYOUT",
+      amountWei: cand.fundedAmountWei,
+      saveEvidence,
     });
 
-    // Verify post state on-chain
-    const after = await readClient.readContract({
-      address: CONTRACT_ADDRESS,
-      functionName: "get_escrow",
-      args: [cand.id],
-    });
-    console.log(`  [✓] Post-Tx On-Chain State: status=${after.status}, matchReason=${after.match_reason}, payout=${after.payout}`);
-
-    const econAfter = await readClient.readContract({
-      address: CONTRACT_ADDRESS,
-      functionName: "get_economics",
-      args: [],
-    });
-
-    if (isInsideWindow) {
-      if (after.status !== "RELEASED") {
-        throw new Error(`Expected RELEASED status, got ${after.status}`);
-      }
-      if (after.match_reason !== "200_IN_WINDOW") {
-        throw new Error(`Expected 200_IN_WINDOW match_reason, got ${after.match_reason}`);
-      }
-      if (BigInt(after.payout) !== BigInt(cand.fundedAmountWei)) {
-        throw new Error(`Expected payout ${cand.fundedAmountWei}, got ${after.payout}`);
-      }
-
-      verifyEconomicsDelta({
-        econBefore,
-        econAfter,
-        expectedType: "PAYOUT",
-        amountWei: cand.fundedAmountWei,
-      });
-    }
-
-    cand.releaseAttempt = {
-      ...cand.releaseAttempt,
-      timestampUtc: new Date().toISOString(),
-      txHash,
-      explorerTxUrl: `https://explorer-studio-dev.genlayer.com/tx/${txHash}`,
-      txStatus: txInfo.statusName,
-      executionResult: txInfo.txExecutionResultName,
-      resultingStatus: after.status,
-      matchReason: after.match_reason,
-      payoutWei: after.payout.toString(),
-      recipient: after.recipient,
-      verified: true,
+    cand.explorerTxUrl = `https://explorer-studio-dev.genlayer.com/tx/${cand.releaseAttempt.txHash}`;
+    cand.finalState = {
+      status: "RELEASED",
+      settled: true,
+      matchReason: "200_IN_WINDOW",
+      recipientPayoutWei: cand.fundedAmountWei,
     };
     saveEvidence();
+    console.log(`  [✓] Candidate escrow successfully released and verified!`);
   }
 
   saveEvidence();
-  console.log(`\n[✓] Evidence record atomically updated.`);
+  console.log(`\n[✓] Candidate evidence atomically updated at: ${EVIDENCE_FILE}`);
 }
 
 main().catch((err) => {
-  console.error("[-] Error:", err);
+  console.error("[-] Candidate runner error:", err);
   process.exit(1);
 });

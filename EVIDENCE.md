@@ -57,27 +57,30 @@ The following transactions and escrows have been audited against scripts and ver
 
 To guarantee that rerun, timeout, or interruption never results in double-submission, state corruption, or false verification claims, both runners (`settle_404_escrows.mjs` and `release_candidate_escrows.mjs`) implement strict safety invariants via [`scripts/evidence_helper.mjs`](file:///d:/shiplock/scripts/evidence_helper.mjs):
 
-1. **Immediate Hash Persistence**:
-   - The returned transaction hash is written to disk *immediately* before waiting for receipt confirmation.
-2. **Pending Transaction Reconciliation (Crash Resilience)**:
-   - Upon rerun, the script looks up any recorded pending transaction hash on-chain via `getTransaction`.
-   - If the recorded transaction is already `FINALIZED` + `FINISHED_WITH_RETURN`, it reconciles the result from that transaction rather than sending another write.
-   - If the transaction reverted or failed, the runner immediately halts with an error. It **never** silently resubmits.
-3. **Fail-Closed Execution Assertion**:
-   - Requires both `statusName === "FINALIZED"` AND `txExecutionResultName === "FINISHED_WITH_RETURN"`. Reverted or error executions abort immediately.
-4. **On-Chain Post-State Verification**:
-   - A transaction is never marked verified based on transaction receipt or escrow status alone.
-   - The runner reads back `get_escrow(id)` and verifies:
-     - Expected `status` (`OPEN`, `RELEASED`, or `REFUND_NOHIT`).
-     - Expected `match_reason` (`LOOKBACK_404_OK`, `EARLY_404_RETRYABLE`, `200_IN_WINDOW`, `WINDOW_EXPIRED_NO_RELEASE`).
-     - Principal integrity (`amount` unchanged).
-     - Accurate `payout` and `refund` values.
-5. **On-Chain Economics Delta Enforcement**:
-   - Compares before and after economics snapshots via `get_economics()`:
-     - **For Release**: `paid_to_recipients` must increase by `amount`, and `escrowed_open` must decrease by `amount`.
-     - **For Refund**: `refunded_to_funders` must increase by `amount`, and `escrowed_open` must decrease by `amount`.
-     - **For In-Window 404 Check**: `escrowed_open`, `paid_to_recipients`, and `refunded_to_funders` must remain unchanged.
-6. **Atomic Evidence Persistence**:
+1. **PyPI Version Endpoint Parity (`urls[]` parsing)**:
+   - Matches `contracts/shiplock.py:126-200` by parsing `data.urls[]` rather than assuming a `releases` key exists (which does not exist at `https://pypi.org/pypi/{package}/{version}/json`).
+   - Requires a usable upload timestamp (`upload_time_iso_8601` or `upload_time`) from an actual non-yanked file in `urls[]`.
+   - Distinguishes HTTP 404, package name/version mismatches, inconclusive responses, yanked files/releases, and valid 200 publications.
+2. **Fail-Closed Release Candidate Policy**:
+   - `release_candidate_escrows.mjs` submits a write *only* when the exact version has trustworthy evidence of publication inside `[window_start_utc, window_end_utc]` and is not yanked.
+   - For missing (HTTP 404), inconclusive (`kind !== "200"`), yanked (`isYanked === true`), or out-of-window (`pubDt < start || pubDt > end`) evidence, the runner records the finding and stops without submitting a write transaction.
+3. **Pre-Transaction Baseline Snapshot Persistence**:
+   - Before submitting any transaction, the runner captures `preEscrowSnapshot` (from `get_escrow`) and `preEconomicsSnapshot` (from `get_economics`).
+   - Persists the baseline snapshots immediately alongside the pending `txHash` and `txStatus: "PENDING"` before awaiting receipt confirmation.
+4. **Pending Transaction Reconciliation on Restart**:
+   - Reconciles any pending transaction *before* applying current registry or time gates.
+   - Upon restart, looks up any recorded pending hash on-chain via `getTransaction` and awaits finalization if still pending.
+   - Reconciles post-state against the *exact baseline snapshots* captured when that transaction was submitted.
+5. **Cross-Boundary In-Window 404 Reconciliation**:
+   - If an in-window 404 release attempt was submitted inside `[window_start, window_end]` and is pending across `window_end`, the restart handler reconciles that in-window transaction first against its saved baseline snapshot (confirming status `OPEN`, principal intact, and economics unchanged).
+   - Only after the in-window transaction is proven finalized and verified does the runner consider post-window settlement (`postWindowSettlement`).
+6. **Strict Verification Criteria (`verified=true`)**:
+   - Never marks `verified=true` unless all 4 gates pass:
+     1. Finalized execution result (`FINALIZED` + `FINISHED_WITH_RETURN`).
+     2. Post-state escrow matches expectations (`RELEASED` with `match_reason: "200_IN_WINDOW"` for release candidates; `REFUND_NOHIT` with `WINDOW_EXPIRED_NO_RELEASE` for post-window settlements; `OPEN` for in-window checks).
+     3. Exact payout/refund amounts match principal.
+     4. On-chain economics delta matches expected type (`PAYOUT`, `REFUND`, or `NO_CHANGE`) relative to `preEconomicsSnapshot`.
+7. **Atomic Evidence Persistence**:
    - Uses `atomicWriteJson`: writes to a unique temporary file (`.tmp.<timestamp>.<rand>`) and calls `renameSync` to eliminate file truncation risks if interrupted.
 
 ---
@@ -166,7 +169,7 @@ Registry credentials must never be passed in command arguments, chat, logs, or c
 |---|---|---|
 | `python -m pytest tests/direct -q` | Direct contract unit tests | **35 passed** |
 | `python -m pytest tests/test_deployer_keystore.py -v` | Keystore & address preservation | **13 passed** |
-| `node --test tests/test_evidence_harness.mjs` | Reverted tx, pending recovery, state checks, atomic write | **8 passed** |
+| `node --test tests/test_evidence_harness.mjs` | PyPI urls parsing, fail-closed candidate release, baseline snapshots, recovery | **22 passed** |
 | `npm --prefix web test` | Frontend flow & contract runtime tests | **45 passed** |
 | `npm --prefix web run lint` | ESLint static analysis | **0 errors** |
 | `npm --prefix web run build` | Next.js production build | **Compiled successfully** |

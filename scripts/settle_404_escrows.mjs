@@ -10,10 +10,14 @@
  *
  * Guarantees:
  * 1. Strict time gate: Never submits before window_start.
- * 2. Fail-closed execution: Requires FINALIZED status and FINISHED_WITH_RETURN result.
- * 3. Atomic persistence: Writes evidence via atomic temporary file rename.
- * 4. Pending tx recovery: Persists tx hash immediately before waiting; reconciles on rerun.
- * 5. Full state & economics verification: Verifies before/after escrow data, principal, match_reason,
+ * 2. Pre-transaction baseline persistence: Persists escrow & economics snapshots before submitting
+ *    and alongside pending txHash.
+ * 3. Pending tx reconciliation first: On restart, reconciles pending in-window or post-window transactions
+ *    against baseline snapshots before evaluating current registry or time gates.
+ * 4. Cross-boundary in-window recovery: Handles an in-window 404 transaction that was pending across
+ *    window_end before considering final settlement.
+ * 5. Fail-closed execution: Requires FINALIZED status and FINISHED_WITH_RETURN result.
+ * 6. Full state & economics verification: Verifies before/after escrow data, principal, match_reason,
  *    and economics deltas. Never marks verified on status alone.
  */
 
@@ -23,8 +27,8 @@ import { homedir } from "node:os";
 import {
   atomicWriteJson,
   readJsonSafe,
-  executeWithPendingRecovery,
-  verifyEconomicsDelta,
+  reconcilePendingTransaction,
+  executeWithBaselineSnapshot,
   queryRegistryMetadata,
 } from "./evidence_helper.mjs";
 
@@ -101,6 +105,75 @@ async function main() {
 
   for (const item of ESCROWS_TO_SETTLE) {
     console.log(`\n--- Inspecting ${item.name} (${item.id.slice(0, 10)}...) ---`);
+
+    let existingIndex = evidence.escrows.findIndex((e) => e.id === item.id);
+    let record = existingIndex >= 0 ? evidence.escrows[existingIndex] : null;
+
+    if (!record) {
+      const escrowInit = await readClient.readContract({
+        address: CONTRACT_ADDRESS,
+        functionName: "get_escrow",
+        args: [item.id],
+      });
+      if (!escrowInit) {
+        throw new Error(`Escrow not found on chain: ${item.id}`);
+      }
+      record = {
+        id: item.id,
+        name: item.name,
+        template: item.template,
+        package: item.package,
+        version: item.version,
+        fundTx: item.fundTx,
+        windowStartUtc: escrowInit.window_start_utc || escrowInit.window_start,
+        windowEndUtc: escrowInit.window_end_utc || escrowInit.window_end,
+        expireAtUtc: escrowInit.expire_at_utc || escrowInit.expire_at,
+        funder: escrowInit.funder,
+        recipient: escrowInit.recipient,
+        principalWei: escrowInit.amount.toString(),
+        initialStatus: escrowInit.status,
+        initialMatchReason: escrowInit.match_reason,
+      };
+      evidence.escrows.push(record);
+      saveEvidence();
+    }
+
+    // 1. RECONCILE PENDING IN-WINDOW TRANSACTION FIRST (before applying current registry or time gates)
+    if (record.inWindowAttempt?.txHash && !record.inWindowAttempt?.verified) {
+      console.log(`  [🔍 RECOVERY] Found unverified pending in-window check (${record.inWindowAttempt.txHash}). Reconciling baseline...`);
+      await reconcilePendingTransaction({
+        client: readClient,
+        contractAddress: CONTRACT_ADDRESS,
+        escrowId: item.id,
+        record,
+        stepKey: "inWindowAttempt",
+        expectedEscrowStatus: "OPEN",
+        expectedMatchReason: null, // can be EARLY_404_RETRYABLE or WINDOW_OPEN_NO_HIT
+        expectedEconomicsDelta: "NO_CHANGE",
+        amountWei: record.principalWei,
+        saveEvidence,
+      });
+      console.log(`  [✓] Successfully reconciled in-window attempt from baseline snapshot.`);
+    }
+
+    // 2. RECONCILE PENDING POST-WINDOW SETTLEMENT FIRST (before new actions)
+    if (record.postWindowSettlement?.txHash && !record.postWindowSettlement?.verified) {
+      console.log(`  [🔍 RECOVERY] Found unverified pending post-window settlement (${record.postWindowSettlement.txHash}). Reconciling baseline...`);
+      await reconcilePendingTransaction({
+        client: readClient,
+        contractAddress: CONTRACT_ADDRESS,
+        escrowId: item.id,
+        record,
+        stepKey: "postWindowSettlement",
+        expectedEscrowStatus: "REFUND_NOHIT",
+        expectedMatchReason: "WINDOW_EXPIRED_NO_RELEASE",
+        expectedEconomicsDelta: "REFUND",
+        amountWei: record.principalWei,
+        saveEvidence,
+      });
+      console.log(`  [✓] Successfully reconciled post-window settlement from baseline snapshot.`);
+    }
+
     const escrow = await readClient.readContract({
       address: CONTRACT_ADDRESS,
       functionName: "get_escrow",
@@ -113,34 +186,12 @@ async function main() {
 
     const startStr = escrow.window_start_utc || escrow.window_start;
     const endStr = escrow.window_end_utc || escrow.window_end;
-    const expStr = escrow.expire_at_utc || escrow.expire_at;
     const windowStart = new Date(startStr);
     const windowEnd = new Date(endStr);
 
     console.log(`  Package:      ${escrow.package_name}@${escrow.version} (${escrow.template})`);
     console.log(`  Current State: status=${escrow.status}, matchReason=${escrow.match_reason}, amount=${escrow.amount}`);
     console.log(`  Window:       ${startStr} -> ${endStr}`);
-
-    let existingIndex = evidence.escrows.findIndex((e) => e.id === item.id);
-    let record = existingIndex >= 0 ? evidence.escrows[existingIndex] : {
-      id: item.id,
-      name: item.name,
-      template: item.template,
-      package: item.package,
-      version: item.version,
-      fundTx: item.fundTx,
-      windowStartUtc: startStr,
-      windowEndUtc: endStr,
-      expireAtUtc: expStr,
-      funder: escrow.funder,
-      recipient: escrow.recipient,
-      principalWei: escrow.amount.toString(),
-      initialStatus: escrow.status,
-      initialMatchReason: escrow.match_reason,
-    };
-    if (existingIndex < 0) {
-      evidence.escrows.push(record);
-    }
 
     // Check registry endpoint live
     console.log(`  [*] Querying official ${item.template} endpoint...`);
@@ -150,6 +201,7 @@ async function main() {
       timestampUtc: now.toISOString(),
       ...regCheck,
     };
+    saveEvidence();
 
     if (escrow.status === "REFUND_NOHIT") {
       console.log(`  [✓] Escrow already fully settled as REFUND_NOHIT. No submission needed.`);
@@ -163,6 +215,7 @@ async function main() {
       continue;
     }
 
+    // 3. TIME GATE: PRE-WINDOW CHECK
     if (now < windowStart) {
       const msLeft = windowStart.getTime() - now.getTime();
       const hoursLeft = (msLeft / (1000 * 60 * 60)).toFixed(2);
@@ -174,6 +227,7 @@ async function main() {
       continue;
     }
 
+    // 4. IN-WINDOW CHECK: windowStart <= now < windowEnd
     if (now >= windowStart && now < windowEnd) {
       console.log(`  [⏳ IN-WINDOW] Execution window is ACTIVE.`);
       if (record.inWindowAttempt?.verified) {
@@ -181,21 +235,16 @@ async function main() {
         continue;
       }
 
-      console.log(`  [*] Executing in-window release attempt with fail-closed checks...`);
+      console.log(`  [*] Executing in-window release attempt with fail-closed checks & baseline snapshots...`);
       const caller = await getCallerAccount();
       const writeClient = createClient({ chain: studioDevnet, account: caller });
 
-      const econBefore = await readClient.readContract({
-        address: CONTRACT_ADDRESS,
-        functionName: "get_economics",
-        args: [],
-      });
-
-      const { txHash, txInfo } = await executeWithPendingRecovery({
+      await executeWithBaselineSnapshot({
         client: readClient,
+        contractAddress: CONTRACT_ADDRESS,
+        escrowId: item.id,
         record,
         stepKey: "inWindowAttempt",
-        saveEvidence,
         submitFn: async () => {
           const feeEst = await writeClient.estimateTransactionFees({
             leaderTimeunitsAllocation: 150n,
@@ -212,54 +261,18 @@ async function main() {
             },
           });
         },
-      });
-
-      // Verify on-chain post state
-      const afterState = await readClient.readContract({
-        address: CONTRACT_ADDRESS,
-        functionName: "get_escrow",
-        args: [item.id],
-      });
-      console.log(`  [✓] Post-Tx Escrow State: status=${afterState.status}, matchReason=${afterState.match_reason}`);
-
-      if (afterState.status !== "OPEN") {
-        throw new Error(`In-window release check failed: expected escrow to remain OPEN, got ${afterState.status}`);
-      }
-      if (BigInt(afterState.amount) !== BigInt(record.principalWei)) {
-        throw new Error(`In-window check failed: principal modified! Expected ${record.principalWei}, got ${afterState.amount}`);
-      }
-      if (BigInt(afterState.payout) !== 0n || BigInt(afterState.refund) !== 0n) {
-        throw new Error(`In-window check failed: payout or refund non-zero while OPEN!`);
-      }
-
-      // Verify economics unchanged
-      const econAfter = await readClient.readContract({
-        address: CONTRACT_ADDRESS,
-        functionName: "get_economics",
-        args: [],
-      });
-      verifyEconomicsDelta({
-        econBefore,
-        econAfter,
-        expectedType: "NO_CHANGE",
+        expectedEscrowStatus: "OPEN",
+        expectedMatchReason: null,
+        expectedEconomicsDelta: "NO_CHANGE",
         amountWei: record.principalWei,
+        saveEvidence,
       });
 
-      record.inWindowAttempt = {
-        ...record.inWindowAttempt,
-        timestampUtc: new Date().toISOString(),
-        txHash,
-        explorerUrl: `https://explorer-studio-dev.genlayer.com/tx/${txHash}`,
-        txStatus: txInfo.statusName,
-        executionResult: txInfo.txExecutionResultName,
-        resultingEscrowStatus: afterState.status,
-        resultingMatchReason: afterState.match_reason,
-        verified: true,
-      };
-      saveEvidence();
+      console.log(`  [✓] In-window check verified! Escrow remains OPEN with principal intact.`);
       continue;
     }
 
+    // 5. POST-WINDOW SETTLEMENT: now >= windowEnd
     if (now >= windowEnd) {
       console.log(`  [🏁 POST-WINDOW] Deadline reached. Executing final REFUND_NOHIT settlement...`);
       if (record.postWindowSettlement?.verified) {
@@ -270,17 +283,12 @@ async function main() {
       const caller = await getCallerAccount();
       const writeClient = createClient({ chain: studioDevnet, account: caller });
 
-      const econBefore = await readClient.readContract({
-        address: CONTRACT_ADDRESS,
-        functionName: "get_economics",
-        args: [],
-      });
-
-      const { txHash, txInfo } = await executeWithPendingRecovery({
+      await executeWithBaselineSnapshot({
         client: readClient,
+        contractAddress: CONTRACT_ADDRESS,
+        escrowId: item.id,
         record,
         stepKey: "postWindowSettlement",
-        saveEvidence,
         submitFn: async () => {
           const feeEst = await writeClient.estimateTransactionFees({
             leaderTimeunitsAllocation: 150n,
@@ -297,55 +305,21 @@ async function main() {
             },
           });
         },
-      });
-
-      // Verify on-chain post state
-      const afterState = await readClient.readContract({
-        address: CONTRACT_ADDRESS,
-        functionName: "get_escrow",
-        args: [item.id],
-      });
-      console.log(`  [✓] Post-Tx Escrow State: status=${afterState.status}, matchReason=${afterState.match_reason}`);
-
-      if (afterState.status !== "REFUND_NOHIT") {
-        throw new Error(`Post-window settlement failed: expected REFUND_NOHIT, got ${afterState.status}`);
-      }
-      if (afterState.match_reason !== "WINDOW_EXPIRED_NO_RELEASE") {
-        throw new Error(`Expected WINDOW_EXPIRED_NO_RELEASE match_reason, got ${afterState.match_reason}`);
-      }
-      if (BigInt(afterState.refund) !== BigInt(record.principalWei)) {
-        throw new Error(`Expected full refund ${record.principalWei}, got ${afterState.refund}`);
-      }
-      if (BigInt(afterState.payout) !== 0n) {
-        throw new Error(`Expected payout 0, got ${afterState.payout}`);
-      }
-
-      // Verify economics delta
-      const econAfter = await readClient.readContract({
-        address: CONTRACT_ADDRESS,
-        functionName: "get_economics",
-        args: [],
-      });
-      verifyEconomicsDelta({
-        econBefore,
-        econAfter,
-        expectedType: "REFUND",
+        expectedEscrowStatus: "REFUND_NOHIT",
+        expectedMatchReason: "WINDOW_EXPIRED_NO_RELEASE",
+        expectedEconomicsDelta: "REFUND",
         amountWei: record.principalWei,
+        saveEvidence,
       });
 
-      record.postWindowSettlement = {
-        ...record.postWindowSettlement,
-        timestampUtc: new Date().toISOString(),
-        txHash,
-        explorerUrl: `https://explorer-studio-dev.genlayer.com/tx/${txHash}`,
-        txStatus: txInfo.statusName,
-        executionResult: txInfo.txExecutionResultName,
-        resultingEscrowStatus: afterState.status,
-        resultingMatchReason: afterState.match_reason,
-        funderRefundWei: afterState.refund.toString(),
-        verified: true,
+      record.finalState = {
+        status: "REFUND_NOHIT",
+        settled: true,
+        matchReason: "WINDOW_EXPIRED_NO_RELEASE",
+        funderRefundWei: record.principalWei,
       };
       saveEvidence();
+      console.log(`  [✓] Post-window REFUND_NOHIT settlement verified!`);
     }
   }
 
