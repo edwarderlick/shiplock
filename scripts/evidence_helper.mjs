@@ -523,6 +523,27 @@ export function verifyEconomicsDelta({
  * - Validates post-escrow state and economics delta against pre-transaction snapshot.
  * - Never sets verified=true unless all checks pass.
  */
+export function syncAttemptHistory(record, step) {
+  if (!record || !step || !step.txHash) return;
+  if (!Array.isArray(record.inWindowAttempts)) {
+    record.inWindowAttempts = [];
+  }
+  const idx = record.inWindowAttempts.findIndex((a) => a.txHash === step.txHash);
+  const entry = { ...step };
+  if (idx >= 0) {
+    record.inWindowAttempts[idx] = entry;
+  } else {
+    record.inWindowAttempts.push(entry);
+  }
+}
+
+/**
+ * Reconciles a recorded pending transaction by hash:
+ * - Checks status on RPC.
+ * - If still pending, awaits finalization.
+ * - Reconciles post-state against the pre-transaction baseline snapshot.
+ * - Fail-closed: throws if status is not FINALIZED / FINISHED_WITH_RETURN.
+ */
 export async function reconcilePendingTransaction({
   client,
   contractAddress,
@@ -541,8 +562,14 @@ export async function reconcilePendingTransaction({
   if (!step || !step.txHash) {
     return false;
   }
-  if (step.verified) {
-    return true;
+  if (step.completed && step.verified) {
+    return {
+      txHash: step.txHash,
+      completed: true,
+      verified: true,
+      early404Verified: Boolean(step.early404Verified),
+      refundSettlementVerified: Boolean(step.refundSettlementVerified),
+    };
   }
 
   const txHash = step.txHash;
@@ -575,6 +602,8 @@ export async function reconcilePendingTransaction({
   if (txInfo.statusName !== "FINALIZED" || txInfo.txExecutionResultName !== "FINISHED_WITH_RETURN") {
     step.failed = true;
     step.verified = false;
+    step.completed = true;
+    if (stepKey === "inWindowAttempt") syncAttemptHistory(record, step);
     saveEvidence();
     throw new Error(
       `Transaction ${txHash} failed closed: status=${txInfo.statusName}, result=${txInfo.txExecutionResultName}`
@@ -634,7 +663,14 @@ export async function reconcilePendingTransaction({
     step.resultingMatchReason = afterEscrow.match_reason;
     step.funderRefundWei = afterEscrow.refund.toString();
     step.executedAfterWindowEnd = true;
-    step.verified = true;
+    step.completed = true;
+    step.verified = false; // Must NOT be counted as an early 404 proof!
+    step.early404Verified = false;
+    step.refundSettlementVerified = true;
+
+    // Distinct evidence flags on record
+    record.early404Verified = false;
+    record.refundSettlementVerified = true;
 
     // Record as final settlement evidence so no duplicate settlement transaction is submitted
     record.postWindowSettlement = {
@@ -647,6 +683,7 @@ export async function reconcilePendingTransaction({
       resultingMatchReason: afterEscrow.match_reason,
       funderRefundWei: afterEscrow.refund.toString(),
       settledViaCrossBoundaryInWindowTx: true,
+      completed: true,
       verified: true,
     };
     record.finalState = {
@@ -656,10 +693,19 @@ export async function reconcilePendingTransaction({
       funderRefundWei: afterEscrow.refund.toString(),
       settledViaCrossBoundaryInWindowTx: true,
     };
+    syncAttemptHistory(record, step);
     saveEvidence();
 
     console.log(`  [✓] Reconciled cross-boundary transaction as final settlement evidence!`);
-    return { txHash, txInfo, executedAfterWindowEnd: true, verified: true };
+    return {
+      txHash,
+      txInfo,
+      executedAfterWindowEnd: true,
+      completed: true,
+      verified: false,
+      early404Verified: false,
+      refundSettlementVerified: true,
+    };
   }
 
   // Handle temporary registry failures during in-window 404 check:
@@ -688,16 +734,31 @@ export async function reconcilePendingTransaction({
     });
 
     step.finalizedAtUtc = new Date().toISOString();
+    step.txStatus = txInfo.statusName;
+    step.executionResult = txInfo.txExecutionResultName;
     step.reconciledFromPending = true;
     step.resultingEscrowStatus = "OPEN";
     step.resultingMatchReason = afterEscrow.match_reason;
     step.temporaryRegistryFailure = true;
+    step.completed = true; // Mark attempt complete!
+    step.retryable = true;
     step.finding = `Temporary registry failure: ${afterEscrow.match_reason} (404 proof unverified, retryable)`;
-    step.verified = false; // MUST NOT mark verified!
+    step.verified = false; // MUST NOT mark 404 proof verified!
+    step.early404Verified = false;
+    record.early404Verified = false;
+
+    syncAttemptHistory(record, step);
     saveEvidence();
 
-    console.log(`  [!] Recorded temporary registry failure separately; in-window 404 proof remains unverified.`);
-    return { txHash, txInfo, temporaryRegistryFailure: true, verified: false };
+    console.log(`  [!] Recorded temporary registry failure separately in attempt history; in-window 404 proof remains unverified.`);
+    return {
+      txHash,
+      txInfo,
+      temporaryRegistryFailure: true,
+      completed: true,
+      verified: false,
+      early404Verified: false,
+    };
   }
 
   // Verify escrow post state
@@ -747,17 +808,36 @@ export async function reconcilePendingTransaction({
   });
 
   step.finalizedAtUtc = new Date().toISOString();
+  step.txStatus = txInfo.statusName;
+  step.executionResult = txInfo.txExecutionResultName;
   step.reconciledFromPending = true;
   step.resultingEscrowStatus = afterEscrow.status;
   step.resultingMatchReason = afterEscrow.match_reason;
   if (afterEscrow.payout !== undefined) step.payoutWei = afterEscrow.payout.toString();
   if (afterEscrow.refund !== undefined) step.funderRefundWei = afterEscrow.refund.toString();
   if (afterEscrow.recipient) step.recipient = String(afterEscrow.recipient);
+  step.completed = true;
   step.verified = true;
+
+  if (stepKey === "inWindowAttempt") {
+    step.early404Verified = true;
+    record.early404Verified = true;
+    syncAttemptHistory(record, step);
+  } else if (stepKey === "postWindowSettlement") {
+    step.refundSettlementVerified = true;
+    record.refundSettlementVerified = true;
+  }
   saveEvidence();
 
   console.log(`  [✓] Reconciled and verified transaction ${txHash}!`);
-  return { txHash, txInfo, verified: true };
+  return {
+    txHash,
+    txInfo,
+    completed: true,
+    verified: true,
+    early404Verified: stepKey === "inWindowAttempt",
+    refundSettlementVerified: stepKey === "postWindowSettlement",
+  };
 }
 
 /**
@@ -778,9 +858,13 @@ export async function executeWithBaselineSnapshot({
   saveEvidence,
   allowCrossBoundaryRefund = false,
   requireEarly404 = false,
+  allowRetry = false,
 }) {
-  // If transaction was already submitted and pending or finalized, reconcile it directly!
-  if (record[stepKey]?.txHash) {
+  const existingStep = record[stepKey];
+
+  // 1. If transaction is genuinely pending, reconcile it before anything else!
+  if (existingStep?.txHash && !existingStep?.completed) {
+    console.log(`  [🔍 RECOVERY] Found genuinely pending transaction: ${existingStep.txHash}. Reconciling baseline...`);
     return await reconcilePendingTransaction({
       client,
       contractAddress,
@@ -797,7 +881,25 @@ export async function executeWithBaselineSnapshot({
     });
   }
 
-  // Capture baseline BEFORE submitting
+  // 2. If already completed and verified, do not re-submit!
+  if (existingStep?.completed && existingStep?.verified) {
+    console.log(`  [✓] Step ${stepKey} already completed and verified (${existingStep.txHash}).`);
+    return { txHash: existingStep.txHash, verified: true, completed: true };
+  }
+
+  // 3. If prior attempt was completed as a temporary failure and retrying is allowed:
+  if (existingStep?.completed && existingStep?.temporaryRegistryFailure && allowRetry) {
+    console.log(`  [🔄 RETRY] Prior attempt ${existingStep.txHash} was a completed temporary failure. Preserving in history and starting NEW attempt...`);
+    syncAttemptHistory(record, existingStep);
+  } else if (existingStep?.txHash && !allowRetry) {
+    return {
+      txHash: existingStep.txHash,
+      verified: Boolean(existingStep.verified),
+      completed: Boolean(existingStep.completed),
+    };
+  }
+
+  // Capture fresh baseline snapshot BEFORE submitting
   const preEscrow = await client.readContract({
     address: contractAddress,
     functionName: "get_escrow",
@@ -815,14 +917,15 @@ export async function executeWithBaselineSnapshot({
 
   // Persist snapshots and pending hash IMMEDIATELY before waiting
   record[stepKey] = {
-    ...(record[stepKey] || {}),
     txHash,
     txStatus: "PENDING",
     submittedAtUtc: new Date().toISOString(),
     preEscrowSnapshot: serializeEscrow(preEscrow),
     preEconomicsSnapshot: serializeEconomics(preEconomics),
     verified: false,
+    completed: false,
   };
+  syncAttemptHistory(record, record[stepKey]);
   saveEvidence();
 
   // Await receipt and reconcile post-state against the baseline
@@ -839,6 +942,72 @@ export async function executeWithBaselineSnapshot({
     saveEvidence,
     allowCrossBoundaryRefund,
     requireEarly404,
+  });
+}
+
+/**
+ * Executes a single in-window check evaluation step for a 404 escrow.
+ * Reconciles any genuinely pending transaction first, then allows one new attempt
+ * if unverified / retryable. Never overwrites or resubmits a pending hash.
+ */
+export async function runInWindowCheckStep({
+  client,
+  contractAddress,
+  escrowId,
+  record,
+  submitFn,
+  saveEvidence = () => {},
+}) {
+  // 1. Reconcile genuinely pending transaction first
+  if (record.inWindowAttempt?.txHash && !record.inWindowAttempt?.completed) {
+    console.log(`  [🔍 RECOVERY] Found genuinely pending in-window check (${record.inWindowAttempt.txHash}). Reconciling baseline...`);
+    await reconcilePendingTransaction({
+      client,
+      contractAddress,
+      escrowId,
+      record,
+      stepKey: "inWindowAttempt",
+      expectedEscrowStatus: "OPEN",
+      expectedMatchReason: "EARLY_404_RETRYABLE",
+      expectedEconomicsDelta: "NO_CHANGE",
+      amountWei: record.principalWei,
+      allowCrossBoundaryRefund: true,
+      requireEarly404: true,
+      saveEvidence,
+    });
+  }
+
+  // 2. If early-404-proof is already verified, do nothing further
+  if (record.early404Verified || record.inWindowAttempt?.early404Verified) {
+    return { verified: true, early404Verified: true, skipped: true };
+  }
+
+  // 3. If already settled via refund (including cross-boundary), do nothing further
+  if (record.refundSettlementVerified || record.postWindowSettlement?.verified) {
+    return { refundSettlementVerified: true, skipped: true };
+  }
+
+  // 4. Never overwrite or resubmit if still genuinely pending
+  if (record.inWindowAttempt?.txHash && !record.inWindowAttempt?.completed) {
+    return { pending: true, skipped: true };
+  }
+
+  // 5. Execute new in-window release attempt with baseline snapshot
+  return await executeWithBaselineSnapshot({
+    client,
+    contractAddress,
+    escrowId,
+    record,
+    stepKey: "inWindowAttempt",
+    submitFn,
+    expectedEscrowStatus: "OPEN",
+    expectedMatchReason: "EARLY_404_RETRYABLE",
+    expectedEconomicsDelta: "NO_CHANGE",
+    amountWei: record.principalWei,
+    allowCrossBoundaryRefund: true,
+    requireEarly404: true,
+    allowRetry: true,
+    saveEvidence,
   });
 }
 

@@ -29,6 +29,7 @@ import {
   readJsonSafe,
   reconcilePendingTransaction,
   executeWithBaselineSnapshot,
+  runInWindowCheckStep,
   queryRegistryMetadata,
 } from "./evidence_helper.mjs";
 
@@ -133,14 +134,25 @@ async function main() {
         principalWei: escrowInit.amount.toString(),
         initialStatus: escrowInit.status,
         initialMatchReason: escrowInit.match_reason,
+        early404Verified: false,
+        refundSettlementVerified: false,
+        inWindowAttempts: [],
       };
       evidence.escrows.push(record);
       saveEvidence();
+    } else {
+      if (!Array.isArray(record.inWindowAttempts)) record.inWindowAttempts = [];
+      if (record.early404Verified === undefined) {
+        record.early404Verified = Boolean(record.inWindowAttempt?.early404Verified);
+      }
+      if (record.refundSettlementVerified === undefined) {
+        record.refundSettlementVerified = Boolean(record.postWindowSettlement?.verified);
+      }
     }
 
     // 1. RECONCILE PENDING IN-WINDOW TRANSACTION FIRST (before applying current registry or time gates)
-    if (record.inWindowAttempt?.txHash && !record.inWindowAttempt?.verified) {
-      console.log(`  [🔍 RECOVERY] Found unverified pending in-window check (${record.inWindowAttempt.txHash}). Reconciling baseline...`);
+    if (record.inWindowAttempt?.txHash && !record.inWindowAttempt?.completed) {
+      console.log(`  [🔍 RECOVERY] Found genuinely pending in-window check (${record.inWindowAttempt.txHash}). Reconciling baseline...`);
       await reconcilePendingTransaction({
         client: readClient,
         contractAddress: CONTRACT_ADDRESS,
@@ -155,12 +167,12 @@ async function main() {
         requireEarly404: true,
         saveEvidence,
       });
-      console.log(`  [✓] Processed in-window attempt from baseline snapshot.`);
+      console.log(`  [✓] Processed pending in-window attempt from baseline snapshot.`);
     }
 
     // 2. RECONCILE PENDING POST-WINDOW SETTLEMENT FIRST (before new actions)
-    if (record.postWindowSettlement?.txHash && !record.postWindowSettlement?.verified) {
-      console.log(`  [🔍 RECOVERY] Found unverified pending post-window settlement (${record.postWindowSettlement.txHash}). Reconciling baseline...`);
+    if (record.postWindowSettlement?.txHash && !record.postWindowSettlement?.completed) {
+      console.log(`  [🔍 RECOVERY] Found genuinely pending post-window settlement (${record.postWindowSettlement.txHash}). Reconciling baseline...`);
       await reconcilePendingTransaction({
         client: readClient,
         contractAddress: CONTRACT_ADDRESS,
@@ -173,7 +185,7 @@ async function main() {
         amountWei: record.principalWei,
         saveEvidence,
       });
-      console.log(`  [✓] Successfully reconciled post-window settlement from baseline snapshot.`);
+      console.log(`  [✓] Successfully reconciled pending post-window settlement from baseline snapshot.`);
     }
 
     const escrow = await readClient.readContract({
@@ -205,8 +217,9 @@ async function main() {
     };
     saveEvidence();
 
-    if (escrow.status === "REFUND_NOHIT" || record.postWindowSettlement?.verified) {
+    if (record.refundSettlementVerified || escrow.status === "REFUND_NOHIT" || record.postWindowSettlement?.verified) {
       console.log(`  [✓] Escrow already fully settled as REFUND_NOHIT. No submission needed.`);
+      record.refundSettlementVerified = true;
       record.finalState = {
         status: "REFUND_NOHIT",
         settled: true,
@@ -232,8 +245,13 @@ async function main() {
     // 4. IN-WINDOW CHECK: windowStart <= now < windowEnd
     if (now >= windowStart && now < windowEnd) {
       console.log(`  [⏳ IN-WINDOW] Execution window is ACTIVE.`);
-      if (record.inWindowAttempt?.verified) {
+      if (record.early404Verified || record.inWindowAttempt?.early404Verified) {
         console.log(`  [✓] In-window release check already verified (Tx: ${record.inWindowAttempt.txHash}, match_reason: ${record.inWindowAttempt.resultingMatchReason}). Escrow remains OPEN.`);
+        continue;
+      }
+
+      if (record.inWindowAttempt?.txHash && !record.inWindowAttempt?.completed) {
+        console.log(`  [⚠️ PENDING] In-window check ${record.inWindowAttempt.txHash} is still pending. Never overwriting or resubmitting.`);
         continue;
       }
 
@@ -241,12 +259,11 @@ async function main() {
       const caller = await getCallerAccount();
       const writeClient = createClient({ chain: studioDevnet, account: caller });
 
-      await executeWithBaselineSnapshot({
+      await runInWindowCheckStep({
         client: readClient,
         contractAddress: CONTRACT_ADDRESS,
         escrowId: item.id,
         record,
-        stepKey: "inWindowAttempt",
         submitFn: async () => {
           const feeEst = await writeClient.estimateTransactionFees({
             leaderTimeunitsAllocation: 150n,
@@ -263,23 +280,15 @@ async function main() {
             },
           });
         },
-        expectedEscrowStatus: "OPEN",
-        expectedMatchReason: "EARLY_404_RETRYABLE",
-        expectedEconomicsDelta: "NO_CHANGE",
-        amountWei: record.principalWei,
-        allowCrossBoundaryRefund: true,
-        requireEarly404: true,
         saveEvidence,
       });
 
-      if (record.inWindowAttempt?.verified) {
-        if (record.inWindowAttempt?.executedAfterWindowEnd) {
-          console.log(`  [✓] In-window check executed across deadline and finalized as REFUND_NOHIT settlement!`);
-        } else {
-          console.log(`  [✓] In-window 404 check verified! Escrow remains OPEN with EARLY_404_RETRYABLE.`);
-        }
+      if (record.early404Verified) {
+        console.log(`  [✓] In-window 404 check verified! Escrow remains OPEN with EARLY_404_RETRYABLE.`);
+      } else if (record.refundSettlementVerified) {
+        console.log(`  [✓] In-window check executed across deadline and finalized as REFUND_NOHIT settlement!`);
       } else if (record.inWindowAttempt?.temporaryRegistryFailure) {
-        console.log(`  [⚠️ TEMPORARY FAILURE] In-window check produced retryable failure: ${record.inWindowAttempt.resultingMatchReason}. 404 proof unverified.`);
+        console.log(`  [⚠️ TEMPORARY FAILURE] In-window check produced retryable failure: ${record.inWindowAttempt.resultingMatchReason}. 404 proof unverified, attempt archived for retry.`);
       }
       continue;
     }
@@ -287,7 +296,7 @@ async function main() {
     // 5. POST-WINDOW SETTLEMENT: now >= windowEnd
     if (now >= windowEnd) {
       console.log(`  [🏁 POST-WINDOW] Deadline reached. Checking settlement state...`);
-      if (record.postWindowSettlement?.verified || escrow.status === "REFUND_NOHIT") {
+      if (record.refundSettlementVerified || record.postWindowSettlement?.verified || escrow.status === "REFUND_NOHIT") {
         console.log(`  [✓] Post-window settlement already verified (Tx: ${record.postWindowSettlement?.txHash || "on-chain"}). No further write.`);
         continue;
       }
@@ -324,6 +333,7 @@ async function main() {
         saveEvidence,
       });
 
+      record.refundSettlementVerified = true;
       record.finalState = {
         status: "REFUND_NOHIT",
         settled: true,

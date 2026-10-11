@@ -67,22 +67,27 @@ To guarantee that rerun, timeout, or interruption never results in double-submis
 3. **Pre-Transaction Baseline Snapshot Persistence**:
    - Before submitting any transaction, the runner captures `preEscrowSnapshot` (from `get_escrow`) and `preEconomicsSnapshot` (from `get_economics`).
    - Persists the baseline snapshots immediately alongside the pending `txHash` and `txStatus: "PENDING"` before awaiting receipt confirmation.
-4. **Pending Transaction Reconciliation on Restart**:
-   - Reconciles any pending transaction *before* applying current registry or time gates.
+4. **Pending Transaction Reconciliation on Restart & Genuinely Pending Protection**:
+   - Reconciles any genuinely pending transaction *before* applying current registry or time gates.
    - Upon restart, looks up any recorded pending hash on-chain via `getTransaction` and awaits finalization if still pending.
+   - Never overwrites or resubmits while a hash is genuinely pending (`!completed`).
    - Reconciles post-state against the *exact baseline snapshots* captured when that transaction was submitted.
-5. **Executed On-Chain Cross-Boundary Settlement Handling**:
+5. **Executed On-Chain Cross-Boundary Settlement Handling & Distinct Evidence Flags**:
    - The runner handles the `window_end` boundary using the transaction's executed on-chain outcome rather than its local submission timestamp.
    - An in-window check submitted near `window_end` that executes after `window_end` on-chain evaluates `now_dt >= end_dt` in `contracts/shiplock.py:598-623` and transitions directly to `REFUND_NOHIT` (`WINDOW_EXPIRED_NO_RELEASE`), refunding the funder.
-   - The harness reconciles that outcome safely against baseline snapshots, validates full funder refund and `REFUND` economics delta, records it as final settlement evidence (`postWindowSettlement` and `finalState`), and halts without submitting a duplicate post-window settlement transaction.
-6. **Strict In-Window 404 & Settlement Verification Criteria (`verified=true`)**:
+   - **Distinct Evidence Flags**: The harness maintains separate evidence flags: `early404Verified` and `refundSettlementVerified`. A transaction executed across `window_end` that refunds the funder is recorded as verified final refund settlement (`refundSettlementVerified = true`, `postWindowSettlement.verified = true`, `finalState.settled = true`), but is explicitly **NOT** counted as an early 404 proof (`early404Verified = false`, `inWindowAttempt.verified = false`). This safely resolves settlement and prevents duplicate post-window settlement submissions.
+6. **Completed Temporary Failure Retry Lifecycle**:
+   - After a transaction is `FINALIZED` / `FINISHED_WITH_RETURN` and proves an in-window temporary registry failure (e.g. `EARLY_UNAVAILABLE_RETRYABLE`) with `OPEN` escrow and unchanged funds, its hash, baseline, and outcome are preserved in attempt history (`record.inWindowAttempts`).
+   - The attempt is marked completed (`completed: true`), keeping the 404 proof unverified (`early404Verified: false`).
+   - On the next run inside the window, the runner reconciles any genuinely pending transaction first, then allows one **new** release attempt with a fresh baseline snapshot and new hash. Both hashes and baselines remain preserved in evidence history.
+7. **Strict In-Window 404 & Settlement Verification Criteria (`verified=true`)**:
    - Never marks `verified=true` unless all 4 gates pass:
      1. Finalized execution result (`FINALIZED` + `FINISHED_WITH_RETURN`).
      2. Post-state escrow matches expectations (`RELEASED` with `match_reason: "200_IN_WINDOW"` for release candidates; `REFUND_NOHIT` with `WINDOW_EXPIRED_NO_RELEASE` for post-window settlements; `OPEN` with `match_reason: "EARLY_404_RETRYABLE"` for in-window 404 proofs).
      3. Exact payout/refund amounts match principal (0 for in-window checks).
      4. On-chain economics delta matches expected type (`PAYOUT`, `REFUND`, or `NO_CHANGE`) relative to `preEconomicsSnapshot`.
-   - **Temporary Registry Failure Separation**: If an in-window check produces a temporary registry failure (e.g. `EARLY_UNAVAILABLE_RETRYABLE` or `EARLY_TEMPORARY_FAILURE`), the harness verifies unchanged principal and economics, records the failure separately (`temporaryRegistryFailure: true`), and does NOT mark the 404 proof verified.
-7. **Atomic Evidence Persistence**:
+   - **Temporary Registry Failure Separation**: If an in-window check produces a temporary registry failure, the harness verifies unchanged principal and economics, records the failure in attempt history, and does NOT mark the 404 proof verified.
+8. **Atomic Evidence Persistence**:
    - Uses `atomicWriteJson`: writes to a unique temporary file (`.tmp.<timestamp>.<rand>`) and calls `renameSync` to eliminate file truncation risks if interrupted.
 
 ---
@@ -171,7 +176,7 @@ Registry credentials must never be passed in command arguments, chat, logs, or c
 |---|---|---|
 | `python -m pytest tests/direct -q` | Direct contract unit tests | **35 passed** |
 | `python -m pytest tests/test_deployer_keystore.py -v` | Keystore & address preservation | **13 passed** |
-| `node --test tests/test_evidence_harness.mjs` | PyPI urls parsing, fail-closed candidate release, baseline snapshots, recovery, strict early 404 retryable, temporary failure isolation, on-chain cross-boundary refund settlement | **25 passed** |
+| `node --test tests/test_evidence_harness.mjs` | PyPI urls parsing, fail-closed candidate release, baseline snapshots, recovery, strict early 404 retryable, temporary failure attempt history & retry lifecycle, distinct early-404 vs refund settlement flags, on-chain cross-boundary refund settlement | **27 passed** |
 | `npm --prefix web test` | Frontend flow & contract runtime tests | **45 passed** |
 | `npm --prefix web run lint` | ESLint static analysis | **0 errors** |
 | `npm --prefix web run build` | Next.js production build | **Compiled successfully** |

@@ -1,6 +1,6 @@
 {
   "contractAddress": "0x7Cef756668Cd925807e8B110D0330643c6F809E3",
-  "checkedAtUtc": "2026-10-11T11:06:56.311Z",
+  "checkedAtUtc": "2026-10-11T11:26:33.023Z",
   "escrows": [
     {
       "id": "0x1ac2eea7c83967a0abe667355598d3809fb2552cc5d4227ad7ba86fee09a3c46",
@@ -17,9 +17,9 @@
       "initialStatus": "OPEN",
       "initialMatchReason": "LOOKBACK_404_OK",
       "currentStatus": "OPEN_PENDING_WINDOW",
-      "timeRemainingHours": "23.44",
+      "timeRemainingHours": "23.11",
       "latestRegistryCheck": {
-        "timestampUtc": "2026-10-11T11:06:56.311Z",
+        "timestampUtc": "2026-10-11T11:26:33.023Z",
         "url": "https://pypi.org/pypi/shiplock-smoke-does-not-exist/0.0.0-smoke.1/json",
         "statusCode": 404,
         "exists": false,
@@ -27,7 +27,10 @@
         "isYanked": false,
         "kind": "404",
         "summary": "Package or version not found (HTTP 404)"
-      }
+      },
+      "inWindowAttempts": [],
+      "early404Verified": false,
+      "refundSettlementVerified": false
     },
     {
       "id": "0x6a335be143b6b8fc255392c764b2cca019ce81ea413dcf6ba88f312ada0bf40e",
@@ -44,9 +47,9 @@
       "initialStatus": "OPEN",
       "initialMatchReason": "LOOKBACK_404_OK",
       "currentStatus": "OPEN_PENDING_WINDOW",
-      "timeRemainingHours": "23.44",
+      "timeRemainingHours": "23.11",
       "latestRegistryCheck": {
-        "timestampUtc": "2026-10-11T11:06:56.311Z",
+        "timestampUtc": "2026-10-11T11:26:33.023Z",
         "url": "https://registry.npmjs.org/shiplock-smoke-does-not-exist-npm",
         "statusCode": 404,
         "exists": false,
@@ -54,7 +57,10 @@
         "isYanked": false,
         "kind": "404",
         "summary": "Package not found on npm (HTTP 404)"
-      }
+      },
+      "inWindowAttempts": [],
+      "early404Verified": false,
+      "refundSettlementVerified": false
     }
   ],
   "candidateReleaseEscrows": [
@@ -76,7 +82,7 @@
       "matchReason": "LOOKBACK_404_OK",
       "createdAtUtc": "2026-10-11T10:11:59.640Z",
       "latestRegistryCheck": {
-        "timestampUtc": "2026-10-11T11:07:05.980Z",
+        "timestampUtc": "2026-10-11T11:26:53.694Z",
         "url": "https://pypi.org/pypi/shiplock-steward-release-live/1.0.0/json",
         "statusCode": 404,
         "exists": false,
@@ -86,7 +92,7 @@
         "summary": "Package or version not found (HTTP 404)"
       },
       "currentStatus": "OPEN_PENDING_WINDOW",
-      "timeRemainingHours": "25.07"
+      "timeRemainingHours": "24.74"
     },
     {
       "target": "npm",
@@ -106,7 +112,7 @@
       "matchReason": "LOOKBACK_404_OK",
       "createdAtUtc": "2026-10-11T10:12:42.443Z",
       "latestRegistryCheck": {
-        "timestampUtc": "2026-10-11T11:07:05.980Z",
+        "timestampUtc": "2026-10-11T11:26:53.694Z",
         "url": "https://registry.npmjs.org/shiplock-steward-release-live",
         "statusCode": 404,
         "exists": false,
@@ -116,7 +122,7 @@
         "summary": "Package not found on npm (HTTP 404)"
       },
       "currentStatus": "OPEN_PENDING_WINDOW",
-      "timeRemainingHours": "25.07"
+      "timeRemainingHours": "24.74"
     }
   ],
   "economics": {
