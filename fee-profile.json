@@ -13,8 +13,8 @@
   },
   "methods": {
     "fund_escrow": {
-      "leaderTimeunitsAllocation": "400",
-      "validatorTimeunitsAllocation": "800",
+      "leaderTimeunitsAllocation": "200",
+      "validatorTimeunitsAllocation": "400",
       "executionBudgetPerRound": "25000000000000000",
       "totalMessageFees": "0",
       "rotationsPerRound": "1"
@@ -27,8 +27,8 @@
       "rotationsPerRound": "1"
     },
     "release": {
-      "leaderTimeunitsAllocation": "400",
-      "validatorTimeunitsAllocation": "800",
+      "leaderTimeunitsAllocation": "200",
+      "validatorTimeunitsAllocation": "400",
       "executionBudgetPerRound": "25000000000000000",
       "totalMessageFees": "1000000000000000",
       "rotationsPerRound": "1"

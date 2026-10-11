@@ -24,6 +24,32 @@ function profileFor(functionName: string) {
   return entry;
 }
 
+export const MIN_PHASE_TIMEOUT = 30n;
+export const MAX_PHASE_TIMEOUT = 600n;
+
+export function validatePhaseAllocations(distribution: {
+  leaderTimeunitsAllocation?: string | number | bigint;
+  validatorTimeunitsAllocation?: string | number | bigint;
+  [key: string]: any;
+}): void {
+  if (!distribution) {
+    throw new Error("Missing fee distribution to validate phase timeouts");
+  }
+  const leader = BigInt(distribution.leaderTimeunitsAllocation ?? 0);
+  const validator = BigInt(distribution.validatorTimeunitsAllocation ?? 0);
+
+  if (leader < MIN_PHASE_TIMEOUT || leader > MAX_PHASE_TIMEOUT) {
+    throw new Error(
+      `Leader phase allocation (${leader}) out of bounds: must be between ${MIN_PHASE_TIMEOUT} and ${MAX_PHASE_TIMEOUT} timeunits`
+    );
+  }
+  if (validator < MIN_PHASE_TIMEOUT || validator > MAX_PHASE_TIMEOUT) {
+    throw new Error(
+      `Validator phase allocation (${validator}) out of bounds: must be between ${MIN_PHASE_TIMEOUT} and ${MAX_PHASE_TIMEOUT} timeunits`
+    );
+  }
+}
+
 export function isTemporaryNetworkOrTransportError(err: unknown): boolean {
   if (!err) return false;
   const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
@@ -154,14 +180,23 @@ export async function writeIc({
   } else {
     // Network unavailable fallback: estimate via client
     const prof = profileFor(functionName);
+    const leaderAlloc = BigInt(prof.leaderTimeunitsAllocation ?? "200");
+    const validatorAlloc = BigInt(prof.validatorTimeunitsAllocation ?? "400");
+    validatePhaseAllocations({
+      leaderTimeunitsAllocation: leaderAlloc,
+      validatorTimeunitsAllocation: validatorAlloc,
+    });
     const fallbackEst = await client.estimateTransactionFees({
-      leaderTimeunitsAllocation: BigInt(prof.leaderTimeunitsAllocation ?? "200"),
-      validatorTimeunitsAllocation: BigInt(prof.validatorTimeunitsAllocation ?? "400"),
+      leaderTimeunitsAllocation: leaderAlloc,
+      validatorTimeunitsAllocation: validatorAlloc,
       rotations: [BigInt(prof.rotationsPerRound ?? "1")],
     });
     distribution = fallbackEst.distribution;
     feeValue = fallbackEst.feeValue;
   }
+
+  // Validate phase allocation bounds (30-600) before wallet signing or transaction submission
+  validatePhaseAllocations(distribution);
 
   const preWriteLog = {
     wallet,

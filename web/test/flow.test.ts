@@ -36,8 +36,16 @@ import {
   writeIc, 
   verifyCreatedEscrow, 
   assertAddress,
-  isTemporaryNetworkOrTransportError 
+  isTemporaryNetworkOrTransportError,
+  validatePhaseAllocations,
+  MIN_PHASE_TIMEOUT,
+  MAX_PHASE_TIMEOUT
 } from "../src/lib/write";
+
+const validDistribution = {
+  leaderTimeunitsAllocation: 200n,
+  validatorTimeunitsAllocation: 400n,
+};
 import { 
   pollActionOutcome 
 } from "../src/lib/action";
@@ -144,7 +152,7 @@ describe("ShipLock Phase 2 - Production Contract Integration & Runtime Flow", ()
       // Injected Transaction Kit isolates test from real Studio RPC
       const mockKit = {
         estimate: async () => ({
-          distribution: {},
+          distribution: validDistribution,
           feeValue: 1000n,
           verification: { status: "verified" as const },
         }),
@@ -310,7 +318,7 @@ describe("ShipLock Phase 2 - Production Contract Integration & Runtime Flow", ()
         account: funder,
         estimateTransactionFees: async () => {
           sdkEstimateCalled = true;
-          return { distribution: {}, feeValue: 1200n };
+          return { distribution: validDistribution, feeValue: 1200n };
         },
         writeContract: async () => {
           writeContractCalled = true;
@@ -355,7 +363,7 @@ describe("ShipLock Phase 2 - Production Contract Integration & Runtime Flow", ()
       };
 
       const mockKit = {
-        estimate: async () => ({ distribution: {}, feeValue: 0n, verification: { status: "verified" as const } }),
+        estimate: async () => ({ distribution: validDistribution, feeValue: 0n, verification: { status: "verified" as const } }),
       };
 
       await assert.rejects(
@@ -395,7 +403,7 @@ describe("ShipLock Phase 2 - Production Contract Integration & Runtime Flow", ()
       };
 
       const mockKit = {
-        estimate: async () => ({ distribution: {}, feeValue: 0n, verification: { status: "verified" as const } }),
+        estimate: async () => ({ distribution: validDistribution, feeValue: 0n, verification: { status: "verified" as const } }),
       };
 
       await assert.rejects(
@@ -426,7 +434,7 @@ describe("ShipLock Phase 2 - Production Contract Integration & Runtime Flow", ()
       };
 
       const mockKit = {
-        estimate: async () => ({ distribution: {}, feeValue: 0n, verification: { status: "verified" as const } }),
+        estimate: async () => ({ distribution: validDistribution, feeValue: 0n, verification: { status: "verified" as const } }),
       };
 
       const receipt = await writeIc({
@@ -741,6 +749,254 @@ describe("ShipLock Phase 2 - Production Contract Integration & Runtime Flow", ()
       assert.equal(outcome.matchReason, "WINDOW_EXPIRED_NO_RELEASE");
       assert.equal(outcome.refund, "5000000000000000000");
       assert.equal(outcome.payout, "0");
+    });
+  });
+
+  describe("6. Phase Timeout & Fee Allocation Bounds Verification (30-600)", () => {
+    const funder = "0x1111111111111111111111111111111111111111";
+    const recipient = "0x2222222222222222222222222222222222222222";
+    const mockProvider = {
+      request: async ({ method }: any) => {
+        if (method === "eth_chainId") return "0xf22d"; // 61997
+        return null;
+      },
+    };
+
+    test("actual fee-profile.json configurations in root and web/src have all phase timeouts strictly within [30, 600]", () => {
+      const rootProfile = JSON.parse(fs.readFileSync(path.resolve(process.cwd(), "../fee-profile.json"), "utf8"));
+      const webProfile = JSON.parse(fs.readFileSync(path.resolve(process.cwd(), "src/fee-profile.json"), "utf8"));
+
+      assert.deepEqual(rootProfile, webProfile, "root fee-profile.json and web/src/fee-profile.json must match");
+
+      for (const [methodName, config] of Object.entries(webProfile.methods as Record<string, any>)) {
+        const leader = BigInt(config.leaderTimeunitsAllocation);
+        const validator = BigInt(config.validatorTimeunitsAllocation);
+        assert.ok(
+          leader >= MIN_PHASE_TIMEOUT && leader <= MAX_PHASE_TIMEOUT,
+          `Method ${methodName} leaderTimeunitsAllocation (${leader}) must be between 30 and 600`
+        );
+        assert.ok(
+          validator >= MIN_PHASE_TIMEOUT && validator <= MAX_PHASE_TIMEOUT,
+          `Method ${methodName} validatorTimeunitsAllocation (${validator}) must be between 30 and 600`
+        );
+      }
+
+      // Explicitly check fund_escrow and release profiles (would have caught old 800 setting)
+      assert.equal(webProfile.methods.fund_escrow.validatorTimeunitsAllocation, "400");
+      assert.equal(webProfile.methods.fund_escrow.leaderTimeunitsAllocation, "200");
+      assert.equal(webProfile.methods.release.validatorTimeunitsAllocation, "400");
+      assert.equal(webProfile.methods.release.leaderTimeunitsAllocation, "200");
+
+      assert.notEqual(
+        webProfile.methods.fund_escrow.validatorTimeunitsAllocation,
+        "800",
+        "Must never configure 800 validator timeunits (exceeds Studio Next 600 cap)"
+      );
+      assert.notEqual(
+        webProfile.methods.release.validatorTimeunitsAllocation,
+        "800",
+        "Must never configure 800 validator timeunits (exceeds Studio Next 600 cap)"
+      );
+    });
+
+    test("validatePhaseAllocations rejects validator allocation of 800 (failed tx exact setting)", () => {
+      assert.throws(
+        () => {
+          validatePhaseAllocations({
+            leaderTimeunitsAllocation: 400n,
+            validatorTimeunitsAllocation: 800n,
+          });
+        },
+        /Validator phase allocation \(800\) out of bounds: must be between 30 and 600 timeunits/
+      );
+    });
+
+    test("validatePhaseAllocations rejects leader and validator allocations outside [30, 600]", () => {
+      // Under minimum (30)
+      assert.throws(
+        () => validatePhaseAllocations({ leaderTimeunitsAllocation: 20n, validatorTimeunitsAllocation: 200n }),
+        /Leader phase allocation \(20\) out of bounds/
+      );
+      assert.throws(
+        () => validatePhaseAllocations({ leaderTimeunitsAllocation: 200n, validatorTimeunitsAllocation: 25n }),
+        /Validator phase allocation \(25\) out of bounds/
+      );
+      // Over maximum (600)
+      assert.throws(
+        () => validatePhaseAllocations({ leaderTimeunitsAllocation: 650n, validatorTimeunitsAllocation: 400n }),
+        /Leader phase allocation \(650\) out of bounds/
+      );
+      assert.throws(
+        () => validatePhaseAllocations({ leaderTimeunitsAllocation: 200n, validatorTimeunitsAllocation: 601n }),
+        /Validator phase allocation \(601\) out of bounds/
+      );
+      // Valid boundaries
+      assert.doesNotThrow(() =>
+        validatePhaseAllocations({ leaderTimeunitsAllocation: 30n, validatorTimeunitsAllocation: 30n })
+      );
+      assert.doesNotThrow(() =>
+        validatePhaseAllocations({ leaderTimeunitsAllocation: 600n, validatorTimeunitsAllocation: 600n })
+      );
+      assert.doesNotThrow(() =>
+        validatePhaseAllocations({ leaderTimeunitsAllocation: 200n, validatorTimeunitsAllocation: 400n })
+      );
+    });
+
+    test("writeIc Transaction Kit path: rejects configured 800 allocation before wallet signing and never calls writeContract", async () => {
+      let writeContractCalled = false;
+      const mockClient = {
+        account: funder,
+        writeContract: async () => {
+          writeContractCalled = true;
+          return "0xtx_should_not_reach";
+        },
+      };
+
+      // Mock TransactionKit returning the uncorrected 800 validator allocation
+      const mockKit800 = {
+        estimate: async () => ({
+          distribution: {
+            leaderTimeunitsAllocation: 400n,
+            validatorTimeunitsAllocation: 800n,
+          },
+          feeValue: 5000n,
+          verification: { status: "verified" as const },
+        }),
+      };
+
+      await assert.rejects(
+        async () => {
+          await writeIc({
+            account: funder,
+            provider: mockProvider,
+            functionName: "fund_escrow",
+            args: ["PYPI_VERSION", "pkg", "1.0", recipient, "2026-10-15T00:00:00Z", "2026-10-17T00:00:00Z", 1n],
+            client: mockClient,
+            transactionKit: mockKit800,
+          });
+        },
+        /Validator phase allocation \(800\) out of bounds/
+      );
+
+      assert.equal(writeContractCalled, false, "Must never prompt wallet or submit tx when phase allocation is 800");
+    });
+
+    test("writeIc fallback path: rejects out-of-bounds allocation before estimate/writeContract", async () => {
+      let estimateCalled = false;
+      let writeContractCalled = false;
+      const mockTransportErrorKit = {
+        estimate: async () => {
+          throw new Error("fetch failed: ECONNREFUSED 127.0.0.1:4000");
+        },
+      };
+
+      // In fallback path with invalid custom distribution returned by estimateTransactionFees
+      const mockBadEstimateClient = {
+        account: funder,
+        estimateTransactionFees: async () => {
+          estimateCalled = true;
+          return {
+            distribution: { leaderTimeunitsAllocation: 200n, validatorTimeunitsAllocation: 800n },
+            feeValue: 5000n,
+          };
+        },
+        writeContract: async () => {
+          writeContractCalled = true;
+          return "0xtx_should_not_reach";
+        },
+      };
+
+      await assert.rejects(
+        async () => {
+          await writeIc({
+            account: funder,
+            provider: mockProvider,
+            functionName: "fund_escrow",
+            args: ["PYPI_VERSION", "pkg", "1.0", recipient, "2026-10-15T00:00:00Z", "2026-10-17T00:00:00Z", 1n],
+            client: mockBadEstimateClient,
+            transactionKit: mockTransportErrorKit,
+          });
+        },
+        /Validator phase allocation \(800\) out of bounds/
+      );
+
+      assert.equal(estimateCalled, true, "Fallback estimateTransactionFees was invoked");
+      assert.equal(writeContractCalled, false, "Must never call writeContract when distribution is out of bounds");
+    });
+
+    test("writeIc with corrected profile successfully passes validated fee parameters to writeContract for fund_escrow and release", async () => {
+      let capturedFeesFund: any = null;
+      let capturedFeesRelease: any = null;
+
+      const mockClient = {
+        account: funder,
+        writeContract: async (params: any) => {
+          if (params.functionName === "fund_escrow") capturedFeesFund = params.fees;
+          if (params.functionName === "release") capturedFeesRelease = params.fees;
+          return "0xtx_success";
+        },
+        getTransaction: async () => ({
+          status: "FINALIZED",
+          statusName: "FINALIZED",
+          txExecutionResultName: "FINISHED_WITH_RETURN",
+        }),
+      };
+
+      const mockKitFund = {
+        estimate: async () => ({
+          distribution: {
+            leaderTimeunitsAllocation: 200n,
+            validatorTimeunitsAllocation: 400n,
+            appealRounds: 0n,
+            rotations: [0n],
+          },
+          feeValue: 25000000000005176n,
+          verification: { status: "verified" as const },
+        }),
+      };
+
+      await writeIc({
+        account: funder,
+        provider: mockProvider,
+        functionName: "fund_escrow",
+        args: ["PYPI_VERSION", "pkg", "1.0", recipient, "2026-10-15T00:00:00Z", "2026-10-17T00:00:00Z", 1n],
+        client: mockClient,
+        transactionKit: mockKitFund,
+      });
+
+      assert.ok(capturedFeesFund);
+      assert.equal(capturedFeesFund.distribution.leaderTimeunitsAllocation, 200n);
+      assert.equal(capturedFeesFund.distribution.validatorTimeunitsAllocation, 400n);
+      assert.ok(capturedFeesFund.distribution.leaderTimeunitsAllocation >= 30n && capturedFeesFund.distribution.leaderTimeunitsAllocation <= 600n);
+      assert.ok(capturedFeesFund.distribution.validatorTimeunitsAllocation >= 30n && capturedFeesFund.distribution.validatorTimeunitsAllocation <= 600n);
+
+      const mockKitRelease = {
+        estimate: async () => ({
+          distribution: {
+            leaderTimeunitsAllocation: 200n,
+            validatorTimeunitsAllocation: 400n,
+            appealRounds: 0n,
+            rotations: [0n],
+          },
+          feeValue: 25000000000005176n,
+          verification: { status: "verified" as const },
+        }),
+      };
+
+      await writeIc({
+        account: funder,
+        provider: mockProvider,
+        functionName: "release",
+        args: ["0x123"],
+        client: mockClient,
+        transactionKit: mockKitRelease,
+      });
+
+      assert.ok(capturedFeesRelease);
+      assert.equal(capturedFeesRelease.distribution.leaderTimeunitsAllocation, 200n);
+      assert.equal(capturedFeesRelease.distribution.validatorTimeunitsAllocation, 400n);
+      assert.ok(capturedFeesRelease.distribution.leaderTimeunitsAllocation >= 30n && capturedFeesRelease.distribution.leaderTimeunitsAllocation <= 600n);
+      assert.ok(capturedFeesRelease.distribution.validatorTimeunitsAllocation >= 30n && capturedFeesRelease.distribution.validatorTimeunitsAllocation <= 600n);
     });
   });
 });
