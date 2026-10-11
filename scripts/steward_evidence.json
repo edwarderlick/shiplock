@@ -170,7 +170,10 @@
     "timeRemainingBeforeWindow": "in_window_pending",
     "windowStartUtc": "2026-10-12T16:17:31Z",
     "connectedWalletIsFunder": false,
-    "escrowPreservedForLaterSettlementOrBrowserCancel": true
+    "escrowPreservedForLaterSettlementOrBrowserCancel": true,
+    "fixCommit": "4995078",
+    "mode1ProductionDeploymentId": "dpl_5KUjzPzsdHNxMaJWMTkXYCTQtHHs",
+    "productionUrl": "https://shiplock-chi.vercel.app/"
   },
   "economics": {
     "escrowedOpenWei": "2070000000000000000",

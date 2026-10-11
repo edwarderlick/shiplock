@@ -139,6 +139,9 @@ The following transactions and escrows have been audited against scripts and ver
      - Authorization check: Under `contracts/shiplock.py` line 674, `cancel` strictly requires `sender == e.funder`. The connected wallet in the local environment is `shiplock-deployer-live` (`0x20E850BAaD26d763d4f691780D1BEBA01c8D6084`), not the funder (`0x7E4E1f7DcC3DA063F9110477Ad348C90E8599253`).
      - In strict adherence to prompt criteria ("only if on-chain time is still before 2026-10-12 16:17:31 UTC and the connected wallet is its funder"), unauthorized cancel submission is withheld.
      - Escrow `0x7f24...` remains safely `OPEN` on-chain with 2.0 GEN locked, preserved for user browser cancel via the updated frontend or its later settlement path.
+   - **Verified GitHub Commit & Vercel Production Deployment**:
+     - **Fix Commit SHA**: [`4995078`](https://github.com/edwarderlick/shiplock/commit/4995078) (pushed and verified on `origin/main`).
+     - **Vercel Production Deployment ID**: `dpl_5KUjzPzsdHNxMaJWMTkXYCTQtHHs` (confirmed via Vercel inspect as `● Ready`, target `production`, mapped to [`https://shiplock-chi.vercel.app`](https://shiplock-chi.vercel.app)).
 
 ---
 
