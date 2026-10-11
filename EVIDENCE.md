@@ -55,11 +55,11 @@ The following transactions and escrows have been audited against scripts and ver
 
 ### Fee Configuration Fix & Live Funding Verification Record
 
-1. **Failed Transaction Inspection & Explorer Limitation (`PhaseTimeoutOutOfBounds`)**:
+1. **Failed Transaction Inspection & Explorer Status (`PhaseTimeoutOutOfBounds`)**:
    - **Transaction Hash**: `0xb8683c030c53bee50cabcacfb1c3d5263b7946bc061d317222c40581a335a9a3`
    - **Receipt Status**: `0x0`
    - **Revert Reason**: `PhaseTimeoutOutOfBounds(800,30,600)`
-   - **Exact JSON-RPC Response (`eth_getTransactionReceipt`)**:
+   - **Selected receipt fields returned by `eth_getTransactionReceipt`**:
      ```json
      {
        "transactionHash": "0xb8683c030c53bee50cabcacfb1c3d5263b7946bc061d317222c40581a335a9a3",
@@ -78,18 +78,18 @@ The following transactions and escrows have been audited against scripts and ver
        "revertReason": "PhaseTimeoutOutOfBounds(800,30,600)"
      }
      ```
-   - **GenLayer Block Explorer Limitation**:
-     When opening this transaction on the Studio Next block explorer ([`https://explorer-studio-dev.genlayer.com/tx/0xb8683c03...`](https://explorer-studio-dev.genlayer.com/tx/0xb8683c030c53bee50cabcacfb1c3d5263b7946bc061d317222c40581a335a9a3)), the explorer UI reports "Transaction not found." This is an indexer limitation: the Studio Next web explorer only ingests transactions from committed consensus blocks with non-zero block numbers. Because transaction `0xb868...` failed during consensus validation before block inclusion, it was assigned `blockNumber: "0x0"`. The canonical GenLayer Studio Next RPC node (`https://studio-dev.genlayer.com/api`) retains the authoritative receipt with status `0x0` and revertReason `PhaseTimeoutOutOfBounds(800,30,600)`, accessible via `eth_getTransactionReceipt`.
+   - **Explorer Display & RPC Receipt Availability**:
+     When opening this transaction on the Studio Next block explorer ([`https://explorer-studio-dev.genlayer.com/tx/0xb8683c03...`](https://explorer-studio-dev.genlayer.com/tx/0xb8683c030c53bee50cabcacfb1c3d5263b7946bc061d317222c40581a335a9a3)), the explorer UI displays "Transaction not found." This absence from the web explorer is consistent with the transaction's `blockNumber: "0x0"` receipt. The canonical GenLayer Studio Next RPC node (`https://studio-dev.genlayer.com/api`) retains and returns the transaction receipt with status `0x0` and revertReason `PhaseTimeoutOutOfBounds(800,30,600)` via `eth_getTransactionReceipt`.
    - **State Impact**: Independently queried `list_ids()` and `get_economics()` on contract `0x7Cef756668Cd925807e8B110D0330643c6F809E3`. Confirmed **no escrow was created and zero principal was locked** by this transaction.
 
 2. **Fee Profile Fix & Client Validation**:
    - **Commit SHA**: [`c2d061b`](https://github.com/edwarderlick/shiplock/commit/c2d061b) (verified on `origin/main`).
    - **Profiles Updated**: Both `fee-profile.json` and `web/src/fee-profile.json` corrected `fund_escrow` and `release` to `leaderTimeunitsAllocation: "200"` and `validatorTimeunitsAllocation: "400"`.
    - **Validation Enforced**: `web/src/lib/write.ts` enforces `validatePhaseAllocations` ensuring leader and validator allocations are strictly within `[30, 600]` before wallet signing and transaction submission across both Transaction Kit and fallback paths.
-   - **Verified Production Deployment IDs (Vercel CLI Independent Verification)**:
-     - Fee Fix Deployment ID: `dpl_9p3KJWhp8VcXyBzeV1hytLAeTibA` (aliased to production URL [https://shiplock-chi.vercel.app/](https://shiplock-chi.vercel.app/)).
-     - Latest Evidence Deployment ID: `dpl_FhKBHcRTUzxcE1TD6W5CLbewKpAK` (aliased to production URL [https://shiplock-chi.vercel.app/](https://shiplock-chi.vercel.app/)).
-     - Independently inspected via `vercel inspect shiplock-chi.vercel.app`, confirming status `● Ready`, target `production`, and serving the 200/400 fee profile with bounds validation in production bundle `3qqakkib_nbz7.js`.
+   - **Verified Vercel Deployment History (Vercel CLI Independent Verification)**:
+     - Historical Fee Fix Deployment: `dpl_9p3KJWhp8VcXyBzeV1hytLAeTibA` (built and served the fee fix at commit `c2d061b`).
+     - Current Production Deployment: `dpl_FhKBHcRTUzxcE1TD6W5CLbewKpAK` (confirmed as the active deployment mapped to [https://shiplock-chi.vercel.app/](https://shiplock-chi.vercel.app/) via `vercel inspect shiplock-chi.vercel.app`, status `● Ready`, target `production`).
+     - Independently verified serving the 200/400 fee profile with bounds validation in production bundle `3qqakkib_nbz7.js`.
 
 3. **Live Funding Proof**:
    - **Role**: **Live Funding Proof** (Explicitly labeled Live Funding Proof; NOT early 404, successful release, or refund proof).

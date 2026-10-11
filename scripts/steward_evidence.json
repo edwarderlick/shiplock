@@ -151,7 +151,8 @@
     "escrowCreated": false,
     "principalLocked": false,
     "fixCommit": "c2d061b9f564da6dd4d98fe24a6d4df5b2d73f1a",
-    "vercelDeploymentId": "dpl_9p3KJWhp8VcXyBzeV1hytLAeTibA",
+    "feeFixDeploymentId": "dpl_9p3KJWhp8VcXyBzeV1hytLAeTibA",
+    "currentProductionDeploymentId": "dpl_FhKBHcRTUzxcE1TD6W5CLbewKpAK",
     "productionUrl": "https://shiplock-chi.vercel.app/"
   },
   "economics": {
