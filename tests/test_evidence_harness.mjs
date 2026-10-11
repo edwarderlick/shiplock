@@ -688,14 +688,200 @@ describe("ShipLock Steward Evidence Harness Tests", () => {
     });
   });
 
-  describe("5. Cross-Boundary Pending In-Window 404 Transaction Finalizing After window_end", () => {
-    it("reconciles in-window pending check first before evaluating post-window settlement", async () => {
-      // Scenario: Script submitted inWindowAttempt before window_end.
-      // Process was restarted when now >= window_end.
-      // The pending inWindowAttempt must be reconciled FIRST against its saved baseline,
-      // confirming it left the escrow OPEN with principal intact.
-      // Only then may postWindowSettlement proceed!
+  describe("5. In-Window 404 Proof Strictness & Cross-Boundary On-Chain Execution", () => {
+    it("verifies in-window 404 proof strictly requires EARLY_404_RETRYABLE with OPEN and unchanged economics", async () => {
+      const mockClient = {
+        getTransaction: async () => ({
+          statusName: "FINALIZED",
+          txExecutionResultName: "FINISHED_WITH_RETURN",
+        }),
+        readContract: async ({ functionName }) => {
+          if (functionName === "get_escrow") {
+            return {
+              status: "OPEN",
+              match_reason: "EARLY_404_RETRYABLE",
+              amount: 20000000000000000n,
+              payout: 0n,
+              refund: 0n,
+            };
+          }
+          if (functionName === "get_economics") {
+            return {
+              escrowed_open: "60000000000000000",
+              paid_to_recipients: "0",
+              refunded_to_funders: "10000000000000000",
+            };
+          }
+        },
+      };
 
+      const record = {
+        inWindowAttempt: {
+          txHash: "0xearly_404_tx",
+          txStatus: "PENDING",
+          preEscrowSnapshot: { status: "OPEN", amount: "20000000000000000" },
+          preEconomicsSnapshot: { escrowed_open: "60000000000000000", paid_to_recipients: "0", refunded_to_funders: "10000000000000000" },
+          verified: false,
+        },
+      };
+
+      const result = await reconcilePendingTransaction({
+        client: mockClient,
+        contractAddress: "0xcontract",
+        escrowId: "0xescrow",
+        record,
+        stepKey: "inWindowAttempt",
+        expectedEscrowStatus: "OPEN",
+        expectedMatchReason: "EARLY_404_RETRYABLE",
+        expectedEconomicsDelta: "NO_CHANGE",
+        amountWei: "20000000000000000",
+        requireEarly404: true,
+        saveEvidence: () => {},
+      });
+
+      assert.equal(result.verified, true);
+      assert.equal(record.inWindowAttempt.verified, true);
+      assert.equal(record.inWindowAttempt.resultingEscrowStatus, "OPEN");
+      assert.equal(record.inWindowAttempt.resultingMatchReason, "EARLY_404_RETRYABLE");
+    });
+
+    it("records temporary registry failure separately and does not mark in-window 404 proof verified", async () => {
+      // Contract lines 594-597: temporary failure produces EARLY_UNAVAILABLE_RETRYABLE
+      const mockClient = {
+        getTransaction: async () => ({
+          statusName: "FINALIZED",
+          txExecutionResultName: "FINISHED_WITH_RETURN",
+        }),
+        readContract: async ({ functionName }) => {
+          if (functionName === "get_escrow") {
+            return {
+              status: "OPEN",
+              match_reason: "EARLY_UNAVAILABLE_RETRYABLE",
+              amount: 20000000000000000n,
+              payout: 0n,
+              refund: 0n,
+            };
+          }
+          if (functionName === "get_economics") {
+            return {
+              escrowed_open: "60000000000000000",
+              paid_to_recipients: "0",
+              refunded_to_funders: "10000000000000000",
+            };
+          }
+        },
+      };
+
+      const record = {
+        inWindowAttempt: {
+          txHash: "0xtemporary_fail_tx",
+          txStatus: "PENDING",
+          preEscrowSnapshot: { status: "OPEN", amount: "20000000000000000" },
+          preEconomicsSnapshot: { escrowed_open: "60000000000000000", paid_to_recipients: "0", refunded_to_funders: "10000000000000000" },
+          verified: false,
+        },
+      };
+
+      const result = await reconcilePendingTransaction({
+        client: mockClient,
+        contractAddress: "0xcontract",
+        escrowId: "0xescrow",
+        record,
+        stepKey: "inWindowAttempt",
+        expectedEscrowStatus: "OPEN",
+        expectedMatchReason: "EARLY_404_RETRYABLE",
+        expectedEconomicsDelta: "NO_CHANGE",
+        amountWei: "20000000000000000",
+        requireEarly404: true,
+        saveEvidence: () => {},
+      });
+
+      assert.equal(result.verified, false);
+      assert.equal(record.inWindowAttempt.verified, false, "Must NOT mark 404 proof verified on temporary registry failure!");
+      assert.equal(record.inWindowAttempt.temporaryRegistryFailure, true);
+      assert.equal(record.inWindowAttempt.resultingMatchReason, "EARLY_UNAVAILABLE_RETRYABLE");
+      assert(record.inWindowAttempt.finding.includes("Temporary registry failure"));
+    });
+
+    it("handles window_end boundary using executed on-chain outcome: pending check producing REFUND_NOHIT reconciles as final settlement without duplicate submission", async () => {
+      // Scenario: Transaction submitted locally as inWindowAttempt.
+      // On-chain execution occurred after window_end, producing REFUND_NOHIT and WINDOW_EXPIRED_NO_RELEASE.
+      // The runner must reconcile that outcome safely as final settlement evidence and NOT submit another settlement.
+      let duplicateSettlementSubmitted = false;
+
+      const mockClient = {
+        getTransaction: async () => ({
+          statusName: "FINALIZED",
+          txExecutionResultName: "FINISHED_WITH_RETURN",
+        }),
+        readContract: async ({ functionName }) => {
+          if (functionName === "get_escrow") {
+            return {
+              status: "REFUND_NOHIT",
+              match_reason: "WINDOW_EXPIRED_NO_RELEASE",
+              amount: 20000000000000000n,
+              payout: 0n,
+              refund: 20000000000000000n,
+            };
+          }
+          if (functionName === "get_economics") {
+            // Post-refund economics
+            return {
+              escrowed_open: "40000000000000000",
+              paid_to_recipients: "0",
+              refunded_to_funders: "30000000000000000",
+            };
+          }
+        },
+      };
+
+      const record = {
+        id: "0xescrow404",
+        principalWei: "20000000000000000",
+        inWindowAttempt: {
+          txHash: "0xcross_boundary_in_window_tx",
+          txStatus: "PENDING",
+          preEscrowSnapshot: { status: "OPEN", amount: "20000000000000000" },
+          preEconomicsSnapshot: { escrowed_open: "60000000000000000", paid_to_recipients: "0", refunded_to_funders: "10000000000000000" },
+          verified: false,
+        },
+      };
+
+      // 1. Reconcile in-window attempt with cross-boundary handling enabled
+      const result = await reconcilePendingTransaction({
+        client: mockClient,
+        contractAddress: "0xcontract",
+        escrowId: record.id,
+        record,
+        stepKey: "inWindowAttempt",
+        expectedEscrowStatus: "OPEN",
+        expectedMatchReason: "EARLY_404_RETRYABLE",
+        expectedEconomicsDelta: "NO_CHANGE",
+        amountWei: record.principalWei,
+        allowCrossBoundaryRefund: true,
+        requireEarly404: true,
+        saveEvidence: () => {},
+      });
+
+      assert.equal(result.executedAfterWindowEnd, true);
+      assert.equal(record.inWindowAttempt.resultingEscrowStatus, "REFUND_NOHIT");
+      assert.equal(record.inWindowAttempt.resultingMatchReason, "WINDOW_EXPIRED_NO_RELEASE");
+
+      // Verify final settlement evidence was recorded directly
+      assert.equal(record.postWindowSettlement.verified, true);
+      assert.equal(record.postWindowSettlement.resultingEscrowStatus, "REFUND_NOHIT");
+      assert.equal(record.postWindowSettlement.funderRefundWei, "20000000000000000");
+      assert.equal(record.finalState.settled, true);
+
+      // 2. Verify runner policy at window_end: since postWindowSettlement is verified, NO duplicate settlement is sent!
+      const shouldSubmitPostWindow = !record.postWindowSettlement?.verified && record.finalState?.status !== "REFUND_NOHIT";
+      if (shouldSubmitPostWindow) {
+        duplicateSettlementSubmitted = true;
+      }
+      assert.equal(duplicateSettlementSubmitted, false, "Must NOT submit a second settlement transaction when cross-boundary settlement succeeded!");
+    });
+
+    it("reconciles in-window pending check executing in-window before window_end first, allowing subsequent post-window settlement", async () => {
       let inWindowReconciledBeforeSettlement = false;
       let settlementExecuted = false;
       let postWindowSettled = false;
@@ -778,9 +964,11 @@ describe("ShipLock Steward Evidence Harness Tests", () => {
           record,
           stepKey: "inWindowAttempt",
           expectedEscrowStatus: "OPEN",
-          expectedMatchReason: null,
+          expectedMatchReason: "EARLY_404_RETRYABLE",
           expectedEconomicsDelta: "NO_CHANGE",
           amountWei: record.principalWei,
+          allowCrossBoundaryRefund: true,
+          requireEarly404: true,
           saveEvidence: () => {},
         });
         inWindowReconciledBeforeSettlement = true;

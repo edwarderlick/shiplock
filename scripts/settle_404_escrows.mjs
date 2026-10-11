@@ -148,12 +148,14 @@ async function main() {
         record,
         stepKey: "inWindowAttempt",
         expectedEscrowStatus: "OPEN",
-        expectedMatchReason: null, // can be EARLY_404_RETRYABLE or WINDOW_OPEN_NO_HIT
+        expectedMatchReason: "EARLY_404_RETRYABLE",
         expectedEconomicsDelta: "NO_CHANGE",
         amountWei: record.principalWei,
+        allowCrossBoundaryRefund: true,
+        requireEarly404: true,
         saveEvidence,
       });
-      console.log(`  [✓] Successfully reconciled in-window attempt from baseline snapshot.`);
+      console.log(`  [✓] Processed in-window attempt from baseline snapshot.`);
     }
 
     // 2. RECONCILE PENDING POST-WINDOW SETTLEMENT FIRST (before new actions)
@@ -203,13 +205,13 @@ async function main() {
     };
     saveEvidence();
 
-    if (escrow.status === "REFUND_NOHIT") {
+    if (escrow.status === "REFUND_NOHIT" || record.postWindowSettlement?.verified) {
       console.log(`  [✓] Escrow already fully settled as REFUND_NOHIT. No submission needed.`);
       record.finalState = {
         status: "REFUND_NOHIT",
         settled: true,
-        matchReason: escrow.match_reason,
-        funderRefundWei: escrow.refund.toString(),
+        matchReason: escrow.match_reason || record.postWindowSettlement?.resultingMatchReason || "WINDOW_EXPIRED_NO_RELEASE",
+        funderRefundWei: (escrow.refund || record.principalWei).toString(),
       };
       saveEvidence();
       continue;
@@ -231,7 +233,7 @@ async function main() {
     if (now >= windowStart && now < windowEnd) {
       console.log(`  [⏳ IN-WINDOW] Execution window is ACTIVE.`);
       if (record.inWindowAttempt?.verified) {
-        console.log(`  [✓] In-window release check already verified (Tx: ${record.inWindowAttempt.txHash}). Escrow remains OPEN.`);
+        console.log(`  [✓] In-window release check already verified (Tx: ${record.inWindowAttempt.txHash}, match_reason: ${record.inWindowAttempt.resultingMatchReason}). Escrow remains OPEN.`);
         continue;
       }
 
@@ -262,21 +264,31 @@ async function main() {
           });
         },
         expectedEscrowStatus: "OPEN",
-        expectedMatchReason: null,
+        expectedMatchReason: "EARLY_404_RETRYABLE",
         expectedEconomicsDelta: "NO_CHANGE",
         amountWei: record.principalWei,
+        allowCrossBoundaryRefund: true,
+        requireEarly404: true,
         saveEvidence,
       });
 
-      console.log(`  [✓] In-window check verified! Escrow remains OPEN with principal intact.`);
+      if (record.inWindowAttempt?.verified) {
+        if (record.inWindowAttempt?.executedAfterWindowEnd) {
+          console.log(`  [✓] In-window check executed across deadline and finalized as REFUND_NOHIT settlement!`);
+        } else {
+          console.log(`  [✓] In-window 404 check verified! Escrow remains OPEN with EARLY_404_RETRYABLE.`);
+        }
+      } else if (record.inWindowAttempt?.temporaryRegistryFailure) {
+        console.log(`  [⚠️ TEMPORARY FAILURE] In-window check produced retryable failure: ${record.inWindowAttempt.resultingMatchReason}. 404 proof unverified.`);
+      }
       continue;
     }
 
     // 5. POST-WINDOW SETTLEMENT: now >= windowEnd
     if (now >= windowEnd) {
-      console.log(`  [🏁 POST-WINDOW] Deadline reached. Executing final REFUND_NOHIT settlement...`);
-      if (record.postWindowSettlement?.verified) {
-        console.log(`  [✓] Post-window settlement already verified (Tx: ${record.postWindowSettlement.txHash}).`);
+      console.log(`  [🏁 POST-WINDOW] Deadline reached. Checking settlement state...`);
+      if (record.postWindowSettlement?.verified || escrow.status === "REFUND_NOHIT") {
+        console.log(`  [✓] Post-window settlement already verified (Tx: ${record.postWindowSettlement?.txHash || "on-chain"}). No further write.`);
         continue;
       }
 

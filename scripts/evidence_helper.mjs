@@ -534,6 +534,8 @@ export async function reconcilePendingTransaction({
   expectedEconomicsDelta, // "NO_CHANGE", "PAYOUT", "REFUND"
   amountWei,
   saveEvidence,
+  allowCrossBoundaryRefund = false,
+  requireEarly404 = false,
 }) {
   const step = record[stepKey];
   if (!step || !step.txHash) {
@@ -601,6 +603,103 @@ export async function reconcilePendingTransaction({
     args: [],
   });
 
+  // Handle cross-boundary execution: an in-window attempt executed on-chain after window_end -> REFUND_NOHIT
+  if (
+    stepKey === "inWindowAttempt" &&
+    allowCrossBoundaryRefund &&
+    afterEscrow.status === "REFUND_NOHIT"
+  ) {
+    console.log(`  [⚡ CROSS-BOUNDARY] Pending in-window check executed on-chain after window_end -> REFUND_NOHIT.`);
+    if (afterEscrow.match_reason !== "WINDOW_EXPIRED_NO_RELEASE") {
+      throw new Error(
+        `Cross-boundary refund expected match_reason WINDOW_EXPIRED_NO_RELEASE, got ${afterEscrow.match_reason}`
+      );
+    }
+    if (BigInt(afterEscrow.refund ?? 0) !== BigInt(amountWei ?? 0)) {
+      throw new Error(
+        `Cross-boundary refund amount mismatch: expected ${amountWei}, got ${afterEscrow.refund}`
+      );
+    }
+
+    verifyEconomicsDelta({
+      econBefore: step.preEconomicsSnapshot,
+      econAfter: afterEconomics,
+      expectedType: "REFUND",
+      amountWei,
+    });
+
+    step.finalizedAtUtc = new Date().toISOString();
+    step.reconciledFromPending = true;
+    step.resultingEscrowStatus = "REFUND_NOHIT";
+    step.resultingMatchReason = afterEscrow.match_reason;
+    step.funderRefundWei = afterEscrow.refund.toString();
+    step.executedAfterWindowEnd = true;
+    step.verified = true;
+
+    // Record as final settlement evidence so no duplicate settlement transaction is submitted
+    record.postWindowSettlement = {
+      txHash: step.txHash,
+      submittedAtUtc: step.submittedAtUtc,
+      finalizedAtUtc: step.finalizedAtUtc,
+      txStatus: txInfo.statusName,
+      executionResult: txInfo.txExecutionResultName,
+      resultingEscrowStatus: "REFUND_NOHIT",
+      resultingMatchReason: afterEscrow.match_reason,
+      funderRefundWei: afterEscrow.refund.toString(),
+      settledViaCrossBoundaryInWindowTx: true,
+      verified: true,
+    };
+    record.finalState = {
+      status: "REFUND_NOHIT",
+      settled: true,
+      matchReason: afterEscrow.match_reason,
+      funderRefundWei: afterEscrow.refund.toString(),
+      settledViaCrossBoundaryInWindowTx: true,
+    };
+    saveEvidence();
+
+    console.log(`  [✓] Reconciled cross-boundary transaction as final settlement evidence!`);
+    return { txHash, txInfo, executedAfterWindowEnd: true, verified: true };
+  }
+
+  // Handle temporary registry failures during in-window 404 check:
+  if (
+    stepKey === "inWindowAttempt" &&
+    afterEscrow.status === "OPEN" &&
+    (requireEarly404 || expectedMatchReason === "EARLY_404_RETRYABLE") &&
+    afterEscrow.match_reason !== "EARLY_404_RETRYABLE"
+  ) {
+    console.log(`  [⚠️ TEMPORARY FAILURE] In-window check produced match_reason '${afterEscrow.match_reason}' (not EARLY_404_RETRYABLE).`);
+
+    // Verify principal and economics were untouched
+    if (BigInt(afterEscrow.amount ?? 0) !== BigInt(step.preEscrowSnapshot.amount ?? 0)) {
+      throw new Error(
+        `Principal modified during temporary registry failure: expected ${step.preEscrowSnapshot.amount}, got ${afterEscrow.amount}`
+      );
+    }
+    if (BigInt(afterEscrow.payout ?? 0) !== 0n || BigInt(afterEscrow.refund ?? 0) !== 0n) {
+      throw new Error(`Payout/refund non-zero during temporary registry failure!`);
+    }
+    verifyEconomicsDelta({
+      econBefore: step.preEconomicsSnapshot,
+      econAfter: afterEconomics,
+      expectedType: "NO_CHANGE",
+      amountWei,
+    });
+
+    step.finalizedAtUtc = new Date().toISOString();
+    step.reconciledFromPending = true;
+    step.resultingEscrowStatus = "OPEN";
+    step.resultingMatchReason = afterEscrow.match_reason;
+    step.temporaryRegistryFailure = true;
+    step.finding = `Temporary registry failure: ${afterEscrow.match_reason} (404 proof unverified, retryable)`;
+    step.verified = false; // MUST NOT mark verified!
+    saveEvidence();
+
+    console.log(`  [!] Recorded temporary registry failure separately; in-window 404 proof remains unverified.`);
+    return { txHash, txInfo, temporaryRegistryFailure: true, verified: false };
+  }
+
   // Verify escrow post state
   if (expectedEscrowStatus && afterEscrow.status !== expectedEscrowStatus) {
     throw new Error(
@@ -658,7 +757,7 @@ export async function reconcilePendingTransaction({
   saveEvidence();
 
   console.log(`  [✓] Reconciled and verified transaction ${txHash}!`);
-  return { txHash, txInfo };
+  return { txHash, txInfo, verified: true };
 }
 
 /**
@@ -677,6 +776,8 @@ export async function executeWithBaselineSnapshot({
   expectedEconomicsDelta,
   amountWei,
   saveEvidence,
+  allowCrossBoundaryRefund = false,
+  requireEarly404 = false,
 }) {
   // If transaction was already submitted and pending or finalized, reconcile it directly!
   if (record[stepKey]?.txHash) {
@@ -691,6 +792,8 @@ export async function executeWithBaselineSnapshot({
       expectedEconomicsDelta,
       amountWei,
       saveEvidence,
+      allowCrossBoundaryRefund,
+      requireEarly404,
     });
   }
 
@@ -734,6 +837,8 @@ export async function executeWithBaselineSnapshot({
     expectedEconomicsDelta,
     amountWei,
     saveEvidence,
+    allowCrossBoundaryRefund,
+    requireEarly404,
   });
 }
 

@@ -71,15 +71,17 @@ To guarantee that rerun, timeout, or interruption never results in double-submis
    - Reconciles any pending transaction *before* applying current registry or time gates.
    - Upon restart, looks up any recorded pending hash on-chain via `getTransaction` and awaits finalization if still pending.
    - Reconciles post-state against the *exact baseline snapshots* captured when that transaction was submitted.
-5. **Cross-Boundary In-Window 404 Reconciliation**:
-   - If an in-window 404 release attempt was submitted inside `[window_start, window_end]` and is pending across `window_end`, the restart handler reconciles that in-window transaction first against its saved baseline snapshot (confirming status `OPEN`, principal intact, and economics unchanged).
-   - Only after the in-window transaction is proven finalized and verified does the runner consider post-window settlement (`postWindowSettlement`).
-6. **Strict Verification Criteria (`verified=true`)**:
+5. **Executed On-Chain Cross-Boundary Settlement Handling**:
+   - The runner handles the `window_end` boundary using the transaction's executed on-chain outcome rather than its local submission timestamp.
+   - An in-window check submitted near `window_end` that executes after `window_end` on-chain evaluates `now_dt >= end_dt` in `contracts/shiplock.py:598-623` and transitions directly to `REFUND_NOHIT` (`WINDOW_EXPIRED_NO_RELEASE`), refunding the funder.
+   - The harness reconciles that outcome safely against baseline snapshots, validates full funder refund and `REFUND` economics delta, records it as final settlement evidence (`postWindowSettlement` and `finalState`), and halts without submitting a duplicate post-window settlement transaction.
+6. **Strict In-Window 404 & Settlement Verification Criteria (`verified=true`)**:
    - Never marks `verified=true` unless all 4 gates pass:
      1. Finalized execution result (`FINALIZED` + `FINISHED_WITH_RETURN`).
-     2. Post-state escrow matches expectations (`RELEASED` with `match_reason: "200_IN_WINDOW"` for release candidates; `REFUND_NOHIT` with `WINDOW_EXPIRED_NO_RELEASE` for post-window settlements; `OPEN` for in-window checks).
-     3. Exact payout/refund amounts match principal.
+     2. Post-state escrow matches expectations (`RELEASED` with `match_reason: "200_IN_WINDOW"` for release candidates; `REFUND_NOHIT` with `WINDOW_EXPIRED_NO_RELEASE` for post-window settlements; `OPEN` with `match_reason: "EARLY_404_RETRYABLE"` for in-window 404 proofs).
+     3. Exact payout/refund amounts match principal (0 for in-window checks).
      4. On-chain economics delta matches expected type (`PAYOUT`, `REFUND`, or `NO_CHANGE`) relative to `preEconomicsSnapshot`.
+   - **Temporary Registry Failure Separation**: If an in-window check produces a temporary registry failure (e.g. `EARLY_UNAVAILABLE_RETRYABLE` or `EARLY_TEMPORARY_FAILURE`), the harness verifies unchanged principal and economics, records the failure separately (`temporaryRegistryFailure: true`), and does NOT mark the 404 proof verified.
 7. **Atomic Evidence Persistence**:
    - Uses `atomicWriteJson`: writes to a unique temporary file (`.tmp.<timestamp>.<rand>`) and calls `renameSync` to eliminate file truncation risks if interrupted.
 
@@ -169,7 +171,7 @@ Registry credentials must never be passed in command arguments, chat, logs, or c
 |---|---|---|
 | `python -m pytest tests/direct -q` | Direct contract unit tests | **35 passed** |
 | `python -m pytest tests/test_deployer_keystore.py -v` | Keystore & address preservation | **13 passed** |
-| `node --test tests/test_evidence_harness.mjs` | PyPI urls parsing, fail-closed candidate release, baseline snapshots, recovery | **22 passed** |
+| `node --test tests/test_evidence_harness.mjs` | PyPI urls parsing, fail-closed candidate release, baseline snapshots, recovery, strict early 404 retryable, temporary failure isolation, on-chain cross-boundary refund settlement | **25 passed** |
 | `npm --prefix web test` | Frontend flow & contract runtime tests | **45 passed** |
 | `npm --prefix web run lint` | ESLint static analysis | **0 errors** |
 | `npm --prefix web run build` | Next.js production build | **Compiled successfully** |
