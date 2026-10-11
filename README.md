@@ -70,12 +70,12 @@ Views: `get_escrow` · `list_ids` · `get_economics` · `get_credit`
 Fees (frontend):
 ```typescript
 estimateTransactionFees({
-  leaderTimeunitsAllocation: 100n,
-  validatorTimeunitsAllocation: 200n,
-  rotations: [0n],
+  leaderTimeunitsAllocation: 200n,
+  validatorTimeunitsAllocation: 400n,
+  rotations: [1n],
 })
 ```
-Do not put `800` into a phase timeout (Studio Next bounds are 30–600).
+Studio Next consensus bounds phase timeouts to 30–600 timeunits. Allocations outside this range (e.g. 800) revert with `PhaseTimeoutOutOfBounds(alloc,30,600)`.
 
 ## Automated tests
 ```bash
@@ -95,7 +95,11 @@ Full matrix: [TESTCASES.md](./TESTCASES.md)
 | Cancel & Refund | `cancel` (`shiplock-smoke-cancel-target`) | `0xdb6d919c7b4462d479917e8df1783a6a087053c80e24bf5bce2600f0fc56ab4e` | CANCELED, 0.01 GEN refunded |
 | Fund PyPI Candidate | `fund_escrow` (`shiplock-steward-release-live`) | `0x0f09d23831be1fb344b135c09cb674529e4caa5c607fe665988b5da80d342cc6` | OPEN, 0.01 GEN, LOOKBACK_404_OK |
 | Fund npm Candidate | `fund_escrow` (`shiplock-steward-release-live`) | `0xb627438c2bb6190960b9eea4c4acb8f09847e14aa02e0b4b219056437bd30a01` | OPEN, 0.01 GEN, LOOKBACK_404_OK |
-| Verify Accounting | `get_economics()` | RPC Query | 0.06 GEN open, 0.01 GEN refunded |
+| Live Funding Proof | `fund_escrow` (`shiplock-live-verify-phase`) | `0xd6f0881c7ac0a3d6f30306e54cc46136c10d3b1a43c46e1c92ab8793e8f55190` | OPEN, 0.01 GEN, LOOKBACK_404_OK |
+| Verify Accounting | `get_economics()` | RPC Query | 0.07 GEN open, 0.01 GEN refunded |
+
+> Historical snapshot (pre-funding-proof, 2026-10-11 11:38 UTC): 0.06 GEN open (`60000000000000000 wei`), 0.01 GEN refunded.  
+> Active on-chain snapshot (post-funding-proof, 2026-10-11 13:38 UTC): 0.07 GEN open (`70000000000000000 wei`), 0.01 GEN refunded.
 
 > Complete reproducible report, time-gate windows, and cleanup audit: [EVIDENCE.md](./EVIDENCE.md).
 > Time-gated release/refund tests require `now >= window_start` (+24h gate). Active funded test escrows remain OPEN on-chain ready for in-window checks after `2026-10-12 10:33:18 UTC` and final refund after `2026-10-14 10:33:18 UTC`.
