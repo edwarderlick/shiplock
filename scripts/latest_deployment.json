@@ -1,0 +1,14 @@
+{
+  "network": "Studio Next",
+  "chainId": 61997,
+  "rpcUrl": "https://studio-dev.genlayer.com/api",
+  "deployerAddress": "0x20E850BAaD26d763d4f691780D1BEBA01c8D6084",
+  "transactionHash": "0x3f7e83337967b194e40fea35a4f8abea7f99a05890a422d2d89096052e2a5854",
+  "contractAddress": "0x7Cef756668Cd925807e8B110D0330643c6F809E3",
+  "explorerTxUrl": "https://explorer-studio-dev.genlayer.com/tx/0x3f7e83337967b194e40fea35a4f8abea7f99a05890a422d2d89096052e2a5854",
+  "explorerContractUrl": "https://explorer-studio-dev.genlayer.com/address/0x7Cef756668Cd925807e8B110D0330643c6F809E3",
+  "localSourceHash": "be743c1a8277716d21018911352fe9d7ccd3dd30fb1b8d829d19384133401a0e",
+  "onChainSourceHash": "be743c1a8277716d21018911352fe9d7ccd3dd30fb1b8d829d19384133401a0e",
+  "sourceVerified": true,
+  "deployedAt": "2026-10-11T08:31:08.030Z"
+}

@@ -1,34 +1,5 @@
-import { createClient } from "genlayer-js";
-import { studioDevnet } from "genlayer-js/chains";
-import fs from "fs";
-
-async function main() {
-  const keystoreData = JSON.parse(fs.readFileSync("../keystore.json", "utf-8"));
-  
-  const client = createClient({
-    chain: studioDevnet,
-    account: {
-        keystore: { ...keystoreData, address: '0x' + keystoreData.address },
-        password: "12345678"
-    }
-  });
-
-  const contractCode = fs.readFileSync("../contracts/shiplock.py", "utf-8");
-
-  console.log("Deploying contract...");
-  try {
-      const tx = await client.deployContract({
-        code: contractCode,
-        args: [],
-        fees: { feeValue: "1000000000000000000" } // 1 GEN
-      });
-      console.log("Tx hash:", tx.hash);
-      
-      const receipt = await client.waitForReceipt({ hash: tx.hash });
-      console.log("Receipt:", receipt);
-      console.log("Contract Address:", receipt.contractAddress);
-  } catch(e) {
-      console.error(e);
-  }
-}
-main();
+// Replaced by web/scripts/deploy.ts using genlayer-js@2.0.0-rc.1 and fee-profile.json.
+// See DEPLOY.md and web/scripts/deploy.ts for verified deployment instructions.
+console.error("[-] web/deploy.mjs has been deprecated and replaced by web/scripts/deploy.ts.");
+console.error("    Please run: npm run deploy");
+process.exit(1);

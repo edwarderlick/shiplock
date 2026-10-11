@@ -16,10 +16,19 @@ Same write. No docket. No appeal UI. No court.
 | Chain ID | 61997 (`0xF22D`) |
 | RPC | https://studio-dev.genlayer.com/api |
 | Explorer | https://explorer-studio-dev.genlayer.com/ |
-| **Contract** | `0xF52d9FD2a1542b3F84417a916f3aB4B4631D0b3D` |
-| Contract explorer | https://explorer-studio-dev.genlayer.com/address/0xF52d9FD2a1542b3F84417a916f3aB4B4631D0b3D |
-| Tests | `python -m pytest tests/direct -q` → **25 passed** |
-| Manual proof | fund 2 GEN OPEN → funder Cancel → CANCELED + native refund |
+| **Active Contract** | `0x7Cef756668Cd925807e8B110D0330643c6F809E3` |
+| Contract explorer | https://explorer-studio-dev.genlayer.com/address/0x7Cef756668Cd925807e8B110D0330643c6F809E3 |
+| Deployment Tx | [`0x3f7e83337967b194e40fea35a4f8abea7f99a05890a422d2d89096052e2a5854`](https://explorer-studio-dev.genlayer.com/tx/0x3f7e83337967b194e40fea35a4f8abea7f99a05890a422d2d89096052e2a5854) |
+| Source Hash (SHA-256) | `be743c1a8277716d21018911352fe9d7ccd3dd30fb1b8d829d19384133401a0e` (Verified 100% parity) |
+| Tests | `python -m pytest tests/direct -q` → **35 passed** |
+| Keystore Tests | `python -m pytest tests/test_deployer_keystore.py -v` → **13 passed** |
+| Live on-chain smoke | Verified on Studio Next: PyPI & npm escrows created, cancel/refund executed |
+
+## Historical Deployments (Archive)
+| Version | Address | Explorer Link | Status |
+|---|---|---|---|
+| Historical Devnet 2 | `0xF52d9FD2a1542b3F84417a916f3aB4B4631D0b3D` | [Explorer](https://explorer-studio-dev.genlayer.com/address/0xF52d9FD2a1542b3F84417a916f3aB4B4631D0b3D) | Historical (Replaced) |
+| Historical Devnet 1 | `0x53EAd6deB8103B278e663Bc9808926FB7B308a63` | [Explorer](https://explorer-studio-dev.genlayer.com/address/0x53EAd6deB8103B278e663Bc9808926FB7B308a63) | Historical (Replaced) |
 
 ## What it is / is not
 ShipLock is **not** a court, not an appeal board, not a vuln escrow.
@@ -65,20 +74,21 @@ Do not put `800` into a phase timeout (Studio Next bounds are 30–600).
 ```bash
 python -m pytest tests/direct -q
 ```
-**25 passed** after aligning the funder=recipient message with `UserError('recipient equals funder')`.
+**35 passed**.
 Covered: hash IDs, 24h / 14d gates, latest/url reject, funder≠recipient, lookback published / yanked / 404, funder cannot release, cancel before start, cancel after start reverts, release before window, RELEASED, yanked and 404 → REFUND_NOHIT, 5xx and non-JSON → INSUFFICIENT, double release, expire bounds, fake id, withdraw ordering, list_ids, economics.
 Full matrix: [TESTCASES.md](./TESTCASES.md)
 
-## Live smoke (localhost, 2026-09-24)
-| Step | Result |
-|---|---|
-| Connect injected wallet, chain 61997 | pass |
-| Fund `PYPI_VERSION` / `shiplock-smoke-does-not-exist` / `0.0.0-smoke.1` / 2 GEN / other recipient / start ≥ +24h | OPEN, hash id |
-| UI amount | `2 GEN` not wei |
-| Funder before window | Cancel visible, Release hidden |
-| Cancel once | CANCELED, 2 GEN back to **funder**, button removed |
+## Live smoke on Studio Next (Chain 61997)
+| Step | Action | Tx Hash | Result |
+|---|---|---|---|
+| Contract Deploy | Deploy `contracts/shiplock.py` | `0x3f7e83337967b194e40fea35a4f8abea7f99a05890a422d2d89096052e2a5854` | FINALIZED, FINISHED_WITH_RETURN |
+| Read Initial State | `list_ids()`, `get_economics()` | RPC Query | 0 escrows, 0 open/paid/refunded |
+| Fund PyPI 404 | `fund_escrow` (`shiplock-smoke-does-not-exist`) | `0x6a307ceab940e184215b576e5826c8f361e2fabe3f9eea4f6769cb6533ac7312` | OPEN, 0.02 GEN, LOOKBACK_404_OK |
+| Fund npm 404 | `fund_escrow` (`shiplock-smoke-does-not-exist-npm`) | `0xd25c4478f9bea148882fabc24620116aaa3d8281280e72115227b49aa2f9d617` | OPEN, 0.02 GEN, LOOKBACK_404_OK |
+| Cancel & Refund | `cancel` (`shiplock-smoke-cancel-target`) | `0xdb6d919c7b4462d479917e8df1783a6a087053c80e24bf5bce2600f0fc56ab4e` | CANCELED, 0.01 GEN refunded |
+| Verify Accounting | `get_economics()` | RPC Query | 0.04 GEN open, 0.01 GEN refunded |
 
-Live `release` / `expire` not run on Studio Next (24h gate). Those branches are the direct tests above. After `window_start`, a **second** wallet should Release the 404 package and get `REFUND_NOHIT`.
+> Time-gated release/refund tests require `now >= window_start` (+24h gate). Active funded test escrows remain OPEN on-chain ready for release tests after `2026-10-12 10:33:18 UTC`.
 
 ## Local app
 ```bash
@@ -93,7 +103,7 @@ Wallet must be on chain 61997. Faucet: Studio Next account dropdown.
 ## Vercel
 Root directory: `web`
 Env (Production + Preview):
-- `NEXT_PUBLIC_CONTRACT_ADDRESS` = `0xF52d9FD2a1542b3F84417a916f3aB4B4631D0b3D`
+- `NEXT_PUBLIC_CONTRACT_ADDRESS` = `0x7Cef756668Cd925807e8B110D0330643c6F809E3`
 - `NEXT_PUBLIC_CHAIN_ID` = `61997`
 - `NEXT_PUBLIC_STUDIO_RPC` = `https://studio-dev.genlayer.com/api`
 - `NEXT_PUBLIC_EXPLORER` = `https://explorer-studio-dev.genlayer.com`

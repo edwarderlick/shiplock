@@ -23,6 +23,9 @@
 # misc
 .DS_Store
 *.pem
+*.keystore
+*keystore*.json
+.deployer_keystore.json
 
 # debug
 npm-debug.log*
@@ -39,3 +42,5 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+.vercel

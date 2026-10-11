@@ -5,11 +5,12 @@
 - Chain ID 61997
 - RPC https://studio-dev.genlayer.com/api
 - Explorer https://explorer-studio-dev.genlayer.com/
-- Contract: 0xc7464f6d5F14559f878528730333D74481c4d00f
+- Active Contract: 0x7Cef756668Cd925807e8B110D0330643c6F809E3
+- Historical Reference: 0xc7464f6d5F14559f878528730333D74481c4d00f
 
 ## Automated (must run)
 Command: `python -m pytest tests/direct -q`
-Last line: `25 passed in 8.80s`
+Last line: `35 passed`
 
 | Test Function | Expected Result | Pass/Fail |
 |---------------|-----------------|-----------|

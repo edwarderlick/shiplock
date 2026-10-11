@@ -10,20 +10,6 @@ import pytest
 # Windows: gltest closes the temp stdin fd after dup2, so genlayer.gl sees EOF.
 # Keep the backing fd open and replay encoded message if fd0 reads empty.
 def _patch_windows_message_inject() -> None:
-    import gltest.direct.sdk_compat as sdk_compat
-    import gltest.direct.wasi_mock as wasi_mock
-
-    def _import_calldata():
-        try:
-            import genlayer.calldata as calldata
-        except ImportError:
-            import genlayer.py.calldata as calldata  # type: ignore[no-redef]
-
-        return calldata
-
-    sdk_compat.import_calldata = _import_calldata
-    wasi_mock.import_calldata = _import_calldata
-
     import gltest.direct.loader as loader
 
     if getattr(loader._inject_message_to_fd0, "_rl_patched", False):

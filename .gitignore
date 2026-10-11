@@ -20,3 +20,9 @@ stitch_export/
 .vscode/
 AGENT_LOG.md
 .antigravity/
+
+.vercel
+keystore.json
+*.keystore
+*keystore*.json
+.deployer_keystore.json

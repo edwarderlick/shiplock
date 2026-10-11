@@ -1,1 +1,23 @@
-{"name": "shiplock-test", "version": "1.0.0", "yanked": false, "time": {"1.0.0": "2026-03-05T12:00:00Z"}}
+{
+  "_id": "shiplock-test",
+  "name": "shiplock-test",
+  "dist-tags": {
+    "latest": "1.0.0"
+  },
+  "versions": {
+    "1.0.0": {
+      "name": "shiplock-test",
+      "version": "1.0.0",
+      "description": "ShipLock npm test package",
+      "main": "index.js",
+      "dist": {
+        "tarball": "https://registry.npmjs.org/shiplock-test/-/shiplock-test-1.0.0.tgz"
+      }
+    }
+  },
+  "time": {
+    "created": "2026-03-01T00:00:00.000Z",
+    "modified": "2026-03-02T14:30:00.000Z",
+    "1.0.0": "2026-03-02T14:30:00.000Z"
+  }
+}

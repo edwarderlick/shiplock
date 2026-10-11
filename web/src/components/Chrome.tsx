@@ -6,9 +6,10 @@ import { useWallet } from "@/lib/wallet";
 import { WalletModal } from "./WalletModal";
 import { formatAddress } from "@/lib/format";
 import { STUDIO_NEXT } from "@/lib/network";
+import { CONTRACT_ADDRESS, IS_CONTRACT_ADDRESS_VALID } from "@/lib/env";
 
 export function Chrome({ children }: { children: React.ReactNode }) {
-  const { address, chainId, balance, isWrongNetwork, switchOrAddStudioNext, disconnect } = useWallet();
+  const { address, chainId, balance, isWrongNetwork, switchOrAddStudioNext } = useWallet();
   const [isWalletModalOpen, setIsWalletModalOpen] = useState(false);
   const [isSwitching, setIsSwitching] = useState(false);
 
@@ -29,12 +30,22 @@ export function Chrome({ children }: { children: React.ReactNode }) {
         : `Chain ${chainId}`
       : null;
 
-  const hasContractAddress = !!(process.env.NEXT_PUBLIC_CONTRACT_ADDRESS);
+  const hasContractAddress = IS_CONTRACT_ADDRESS_VALID && !!CONTRACT_ADDRESS;
 
   return (
     <>
       <header className="fixed top-0 left-0 right-0 z-50 bg-surface/90 backdrop-blur-md shadow-[0_1px_8px_rgba(0,0,0,0.4)]">
         <div className="w-full px-margin-sm md:px-margin flex flex-col">
+          {/* Missing/Invalid Contract Address Banner */}
+          {!hasContractAddress && (
+            <div className="w-full py-space-xs px-space-sm bg-error-container text-on-error-container font-mono-label-xs text-mono-label-xs tracking-wider uppercase flex items-center justify-between" id="contract-alert">
+              <div className="flex items-center gap-space-sm">
+                <span className="material-symbols-outlined text-[14px]">error</span>
+                <span>CONFIGURATION ERROR: NEXT_PUBLIC_CONTRACT_ADDRESS IS MISSING OR INVALID. CONTRACT INTERACTIONS DISABLED.</span>
+              </div>
+            </div>
+          )}
+
           {/* Wrong Network Banner — only shows when address is set and chain is wrong */}
           {isWrongNetwork && (
             <div className="w-full py-space-xs px-space-sm bg-error-container text-on-error-container font-mono-label-xs text-mono-label-xs tracking-wider uppercase flex items-center justify-between" id="network-alert">
@@ -60,16 +71,16 @@ export function Chrome({ children }: { children: React.ReactNode }) {
                   <span className="font-mono-label-xs text-mono-label-xs text-on-surface-variant uppercase tracking-widest">REGISTRY // ESCROW</span>
                 </div>
               </Link>
-              {/* Contract address badge — only shown when NEXT_PUBLIC_CONTRACT_ADDRESS is set */}
+              {/* Contract address badge */}
               <div className="hidden xl:flex items-center gap-space-xs font-mono-label-xs text-mono-label-xs text-on-surface-variant px-space-sm py-1 bg-surface-container-low">
                 <span className="text-primary-fixed">[SYS: CAD_v2.4]</span>
                 <span className="text-outline">{"//"}</span>
                 {hasContractAddress ? (
-                  <span className="text-secondary font-mono truncate max-w-[120px]">
-                    {process.env.NEXT_PUBLIC_CONTRACT_ADDRESS!.substring(0, 6)}...{process.env.NEXT_PUBLIC_CONTRACT_ADDRESS!.slice(-4)}
+                  <span className="text-secondary font-mono truncate max-w-[120px]" title={CONTRACT_ADDRESS}>
+                    {CONTRACT_ADDRESS.substring(0, 6)}...{CONTRACT_ADDRESS.slice(-4)}
                   </span>
                 ) : (
-                  <span className="text-outline">CONTRACT NOT WIRED</span>
+                  <span className="text-error font-bold">CONTRACT NOT CONFIGURED</span>
                 )}
               </div>
             </div>
