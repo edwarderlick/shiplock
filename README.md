@@ -20,8 +20,9 @@ Same write. No docket. No appeal UI. No court.
 | Contract explorer | https://explorer-studio-dev.genlayer.com/address/0x7Cef756668Cd925807e8B110D0330643c6F809E3 |
 | Deployment Tx | [`0x3f7e83337967b194e40fea35a4f8abea7f99a05890a422d2d89096052e2a5854`](https://explorer-studio-dev.genlayer.com/tx/0x3f7e83337967b194e40fea35a4f8abea7f99a05890a422d2d89096052e2a5854) |
 | Source Hash (SHA-256) | `be743c1a8277716d21018911352fe9d7ccd3dd30fb1b8d829d19384133401a0e` (Verified 100% parity) |
-| Tests | `python -m pytest tests/direct -q` → **35 passed** |
-| Keystore Tests | `python -m pytest tests/test_deployer_keystore.py -v` → **13 passed** |
+| Tests | `python -m pytest` → **48 passed** (35 direct contract tests + 13 deployer keystore tests) |
+| Web Tests | `npm --prefix web test` → **69 passed** (15 suites) |
+| Evidence Tests | `node --test tests/test_evidence_harness.mjs` → **35 passed** (8 suites) |
 | Live on-chain smoke | Verified on Studio Next: PyPI & npm 404 escrows, cancel/refund, candidate release escrows ([EVIDENCE.md](./EVIDENCE.md)) |
 | Steward Evidence | [EVIDENCE.md](./EVIDENCE.md) · [steward_evidence.json](./scripts/steward_evidence.json) |
 
@@ -67,17 +68,16 @@ Views: `get_escrow` · `list_ids` · `get_economics` · `get_credit`
 ## Money
 `_pay` calls `_Recipient(addr).emit_transfer(value=amount)` **then** updates status / credits. Cancel on the live smoke lock refunded the funder wallet in the same finalized tx.
 
-Fees (frontend):
+Fees (frontend & runners):
 ```typescript
-// Non-transfer writes (e.g. fund_escrow):
+// 1. Non-transfer writes (e.g. fund_escrow):
 estimateTransactionFees({
   leaderTimeunitsAllocation: 200n,
   validatorTimeunitsAllocation: 400n,
   rotations: [1n],
 });
 
-// Transfer writes (cancel, release, expire, withdraw):
-// GenLayer Mode 1 requires messageAllocations matching emitted messages:
+// 2. Transfer writes with deterministic single recipient (cancel, expire, withdraw):
 const { distribution, messageAllocations, feeValue } = await client.estimateTransactionFeesForWrite({
   address: CONTRACT_ADDRESS,
   functionName: "cancel",
@@ -86,16 +86,39 @@ const { distribution, messageAllocations, feeValue } = await client.estimateTran
   leaderTimeunitsAllocation: 200n,
   validatorTimeunitsAllocation: 400n,
 });
-// Passed to writeContract with messageAllocations preserved
+
+// 3. Release transactions: Two-recipient allocation path covering both outcomes:
+// Consensus can reach recipient payout (200), early 404 (0 messages), or funder refund (cross-boundary execution).
+// We build a complete 2-root allocation tree covering both escrow.recipient and escrow.funder:
+const completeAllocations = buildReleaseMessageAllocations({
+  recipient: escrow.recipient,
+  funder: escrow.funder,
+  budget: 150000000000000n, // 150,000 Gwei per root node
+});
+const { distribution, messageAllocations, feeValue } = await client.estimateTransactionFees({
+  leaderTimeunitsAllocation: 200n,
+  validatorTimeunitsAllocation: 400n,
+  rotations: [1n],
+  messageAllocations: completeAllocations,
+});
+// Enforced via validateTransferAllocations before wallet signing or runner submission.
 ```
 Studio Next consensus bounds phase timeouts to 30–600 timeunits. Allocations outside this range (e.g. 800) revert with `PhaseTimeoutOutOfBounds(alloc,30,600)`. Any fee-bearing emission requires an explicit message allocation tree.
 
+> **Qualification Note**: The cross-boundary tests in `web/test/flow.test.ts` and `tests/test_evidence_harness.mjs` are mocked/simulated, and fee estimation in `scripts/preflight_studio_check.mjs` is strictly read-only. Neither is a live refund proof. Live settlement proofs require execution within their scheduled time windows.
+
 ## Automated tests
 ```bash
-python -m pytest tests/direct -q
+# Contract & Keystore Tests (48 passed)
+python -m pytest
+
+# Frontend Runtime & Integration Flow (69 passed)
+npm --prefix web test
+
+# Fail-Closed Evidence Harness & Recovery Tests (35 passed)
+node --test tests/test_evidence_harness.mjs
 ```
-**35 passed**.
-Covered: deterministic hash IDs, concurrent distinct IDs, early 404 leaves OPEN & retryable then settles on later success, unexpected HTTP statuses (429/403/301/500) leave OPEN before and after window, fund lookback permits only verified absent, npm deprecated vs yanked, realistic large npm responses & oversize caps, now_dt explicit timestamp requirement, scoped npm packages, window-end refund boundary, in-window publication settling after window-end, PyPI multi-file earliest non-yanked selection, yanked release refunds funder, economics across all transitions, 24h & 14d gates, latest/url reject, funder≠recipient, funder cannot release, cancel before start, cancel after start reverts, release before window reverts, double release reverts, expire grace bounds, list_ids parity, withdraw ordering, end-to-end matching flow, and fail-closed handling of missing/malformed npm/PyPI metadata leaving escrows OPEN.
+Covered: deterministic hash IDs, concurrent distinct IDs, early 404 leaves OPEN & retryable then settles on later success, unexpected HTTP statuses (429/403/301/500) leave OPEN before and after window, fund lookback permits only verified absent, npm deprecated vs yanked, realistic large npm responses & oversize caps, now_dt explicit timestamp requirement, scoped npm packages, window-end refund boundary, in-window publication settling after window-end, PyPI multi-file earliest non-yanked selection, yanked release refunds funder, economics across all transitions, 24h & 14d gates, latest/url reject, funder≠recipient, funder cannot release, cancel before start, cancel after start reverts, release before window reverts, double release reverts, expire grace bounds, list_ids parity, withdraw ordering, end-to-end matching flow, two-recipient release allocation trees, and fail-closed handling of missing/malformed npm/PyPI metadata leaving escrows OPEN.
 Full matrix: [TESTCASES.md](./TESTCASES.md)
 
 ## Live smoke & steward evidence on Studio Next (Chain 61997)

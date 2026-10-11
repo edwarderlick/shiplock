@@ -143,6 +143,28 @@ The following transactions and escrows have been audited against scripts and ver
      - **Fix Commit SHA**: [`4995078`](https://github.com/edwarderlick/shiplock/commit/4995078) (pushed and verified on `origin/main`).
      - **Vercel Production Deployment ID**: `dpl_5KUjzPzsdHNxMaJWMTkXYCTQtHHs` (confirmed via Vercel inspect as `● Ready`, target `production`, mapped to [`https://shiplock-chi.vercel.app`](https://shiplock-chi.vercel.app)).
 
+5. **Cross-Boundary Release Fee Safety & Two-Recipient Allocation Tree Architecture**:
+   - **Hazard Trace**:
+     The contract can leave an escrow `OPEN` for an in-window 404 (`EARLY_404_RETRYABLE`), emitting 0 messages. The exact same `release(id)` transaction produces `REFUND_NOHIT` (`WINDOW_EXPIRED_NO_RELEASE`) and calls `emit_transfer(escrow.funder)` if it executes after `window_end`. A pre-submit Studio simulation at $t < \text{window\_end}$ observes the early 404 branch and returns no messageAllocations (`[]`). Submitting that quote causes GenVM to abort with `Mode1MessageFeesRequireGenVMPerEmissionSupport` if consensus execution crosses the deadline.
+   - **Two-Recipient Allocation Tree (`buildReleaseMessageAllocations`)**:
+     To guarantee that every `release(id)` transaction is safe for every outcome consensus can reach (recipient payout, early 404 retryable, or funder refund), `web/src/lib/write.ts`, `scripts/evidence_helper.mjs`, `scripts/settle_404_escrows.mjs`, and `scripts/release_candidate_escrows.mjs` construct a complete 2-root allocation tree:
+     ```typescript
+     const messageAllocations = buildReleaseMessageAllocations({
+       recipient: escrow.recipient,
+       funder: escrow.funder,
+       budget: 150000000000000n, // 150,000 Gwei per root node
+     });
+     ```
+     - Root Node 0 (`recipientNode`): `parentIndex: MESSAGE_ALLOCATION_ROOT_PARENT_INDEX`, `recipient: escrow.recipient`, budget `150000000000000n`.
+     - Root Node 1 (`funderNode`): `parentIndex: MESSAGE_ALLOCATION_ROOT_PARENT_INDEX`, `recipient: escrow.funder`, budget `150000000000000n`.
+   - **Authoritative Fee Estimation**:
+     `client.estimateTransactionFees` computes authoritative `distribution` (`totalMessageFees: 300000000000000n`) and `feeValue` incorporating network policy for both potential transfers.
+   - **Fail-Closed Validation (`validateTransferAllocations`)**:
+     Enforces that `release` message allocations contain root allocations covering both `escrow.recipient` and `escrow.funder`. Rejects empty allocations or single-recipient quotes with a clear local error before wallet signing or transaction submission.
+   - **Explicit Verification Qualification**:
+     > [!IMPORTANT]
+     > **The cross-boundary test in `web/test/flow.test.ts` and `tests/test_evidence_harness.mjs` is mocked and simulated in runtime test harnesses, and fee estimation via `scripts/preflight_studio_check.mjs` is strictly read-only. Neither is a live refund proof.** No time-gated release or refund transaction has been executed early on-chain. Live in-window 404 proofs and final refund settlement proofs remain strictly time-gated and require live on-chain execution after their respective windows open.
+
 ---
 
 ## 3. Fail-Closed Evidence Harness Architecture
@@ -268,8 +290,10 @@ Registry credentials must never be passed in command arguments, chat, logs, or c
 |---|---|---|
 | `python -m pytest tests/direct -q` | Direct contract unit tests | **35 passed** |
 | `python -m pytest tests/test_deployer_keystore.py -v` | Keystore & address preservation | **13 passed** |
-| `node --test tests/test_evidence_harness.mjs` | PyPI urls parsing, candidate release, baseline snapshots, recovery, strict early 404, temporary failure retry lifecycle, refund settlement, Mode 1 message fee allocations | **31 passed** |
-| `npm --prefix web test` | Frontend flow & contract runtime tests (including phase timeout bounds & Section 7 Mode 1 transfer fee allocation tests) | **65 passed** |
+| `python -m pytest` | **Combined Python test suite** | **48 passed** |
+| `node --test tests/test_evidence_harness.mjs` | PyPI urls parsing, candidate release, baseline snapshots, recovery, strict early 404, temporary failure retry lifecycle, refund settlement, Mode 1 transfer fee allocation trees, cross-boundary reconciliation | **35 passed** |
+| `npm --prefix web test` | Frontend flow & contract runtime tests (phase timeout bounds, Mode 1 transfer fee allocation trees, two-recipient release allocation path, cross-boundary release safety, ActionModal polling) | **69 passed** |
+| `node scripts/preflight_studio_check.mjs` | Read-only preflight on Studio Next: contract economics, 6 escrows (including manual 2 GEN escrow), allocation construction & authoritative fee estimation | **All 6 escrows verified (Read-only)** |
 | `npm --prefix web run lint` | ESLint static analysis | **0 errors** |
 | `npm --prefix web run build` | Next.js production build | **Compiled successfully** |
-| `https://shiplock-chi.vercel.app/` | Live Vercel production deployment | **Verified live** |
+| `https://shiplock-chi.vercel.app/` | Live Vercel production deployment (`dpl_F5RHC4RAd9c1MHXfsspfiLxJ1eGm`) | **Verified live (HTTP 200)** |
