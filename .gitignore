@@ -26,3 +26,5 @@ keystore.json
 *.keystore
 *keystore*.json
 .deployer_keystore.json
+
+.vercel
