@@ -1,0 +1,85 @@
+{
+  "contractAddress": "0x7Cef756668Cd925807e8B110D0330643c6F809E3",
+  "checkedAtUtc": "2026-10-11T10:14:20.946Z",
+  "escrows": [
+    {
+      "id": "0x1ac2eea7c83967a0abe667355598d3809fb2552cc5d4227ad7ba86fee09a3c46",
+      "name": "PyPI 404 Escrow",
+      "template": "PYPI_VERSION",
+      "package": "shiplock-smoke-does-not-exist",
+      "version": "0.0.0-smoke.1",
+      "fundTx": "0x6a307ceab940e184215b576e5826c8f361e2fabe3f9eea4f6769cb6533ac7312",
+      "windowStartUtc": "2026-10-12T10:33:18Z",
+      "windowEndUtc": "2026-10-14T10:33:18Z",
+      "funder": "0x20E850BAaD26d763d4f691780D1BEBA01c8D6084",
+      "recipient": "0x0f907a2598AEF71B988f9208103066586A1a4aF0",
+      "principalWei": "20000000000000000",
+      "initialStatus": "OPEN",
+      "initialMatchReason": "LOOKBACK_404_OK",
+      "currentStatus": "OPEN_PENDING_WINDOW",
+      "timeRemainingHours": "24.32"
+    },
+    {
+      "id": "0x6a335be143b6b8fc255392c764b2cca019ce81ea413dcf6ba88f312ada0bf40e",
+      "name": "npm 404 Escrow",
+      "template": "NPM_VERSION",
+      "package": "shiplock-smoke-does-not-exist-npm",
+      "version": "0.0.0-smoke.1",
+      "fundTx": "0xd25c4478f9bea148882fabc24620116aaa3d8281280e72115227b49aa2f9d617",
+      "windowStartUtc": "2026-10-12T10:33:18Z",
+      "windowEndUtc": "2026-10-14T10:33:18Z",
+      "funder": "0x20E850BAaD26d763d4f691780D1BEBA01c8D6084",
+      "recipient": "0x0f907a2598AEF71B988f9208103066586A1a4aF0",
+      "principalWei": "20000000000000000",
+      "initialStatus": "OPEN",
+      "initialMatchReason": "LOOKBACK_404_OK",
+      "currentStatus": "OPEN_PENDING_WINDOW",
+      "timeRemainingHours": "24.32"
+    }
+  ],
+  "candidateReleaseEscrows": [
+    {
+      "target": "PyPI",
+      "template": "PYPI_VERSION",
+      "package": "shiplock-steward-release-live",
+      "version": "1.0.0",
+      "id": "0xdc2dfac88f9a7dbc2615c3a2338cd12819efca660352c1d1c8b6f530ed5f9c1a",
+      "txHash": "0x0f09d23831be1fb344b135c09cb674529e4caa5c607fe665988b5da80d342cc6",
+      "explorerTxUrl": "https://explorer-studio-dev.genlayer.com/tx/0x0f09d23831be1fb344b135c09cb674529e4caa5c607fe665988b5da80d342cc6",
+      "explorerContractUrl": "https://explorer-studio-dev.genlayer.com/address/0x7Cef756668Cd925807e8B110D0330643c6F809E3",
+      "fundedAmountWei": "10000000000000000",
+      "funder": "0x20E850BAaD26d763d4f691780D1BEBA01c8D6084",
+      "recipient": "0x0f907a2598AEF71B988f9208103066586A1a4aF0",
+      "windowStartUtc": "2026-10-12T12:11:12Z",
+      "windowEndUtc": "2026-10-14T12:11:12Z",
+      "status": "OPEN",
+      "matchReason": "LOOKBACK_404_OK",
+      "createdAtUtc": "2026-10-11T10:11:59.640Z"
+    },
+    {
+      "target": "npm",
+      "template": "NPM_VERSION",
+      "package": "shiplock-steward-release-live",
+      "version": "1.0.0",
+      "id": "0x3c46e617d6541f63e69f783c0a481f429bb9c7e08509274ebbef25fc1b8444ad",
+      "txHash": "0xb627438c2bb6190960b9eea4c4acb8f09847e14aa02e0b4b219056437bd30a01",
+      "explorerTxUrl": "https://explorer-studio-dev.genlayer.com/tx/0xb627438c2bb6190960b9eea4c4acb8f09847e14aa02e0b4b219056437bd30a01",
+      "explorerContractUrl": "https://explorer-studio-dev.genlayer.com/address/0x7Cef756668Cd925807e8B110D0330643c6F809E3",
+      "fundedAmountWei": "10000000000000000",
+      "funder": "0x20E850BAaD26d763d4f691780D1BEBA01c8D6084",
+      "recipient": "0x0f907a2598AEF71B988f9208103066586A1a4aF0",
+      "windowStartUtc": "2026-10-12T12:11:12Z",
+      "windowEndUtc": "2026-10-14T12:11:12Z",
+      "status": "OPEN",
+      "matchReason": "LOOKBACK_404_OK",
+      "createdAtUtc": "2026-10-11T10:12:42.443Z"
+    }
+  ],
+  "economics": {
+    "escrowedOpenWei": "60000000000000000",
+    "outstandingCreditsWei": "0",
+    "paidToRecipientsWei": "0",
+    "refundedToFundersWei": "10000000000000000",
+    "treasuryWei": "0"
+  }
+}

@@ -22,7 +22,8 @@ Same write. No docket. No appeal UI. No court.
 | Source Hash (SHA-256) | `be743c1a8277716d21018911352fe9d7ccd3dd30fb1b8d829d19384133401a0e` (Verified 100% parity) |
 | Tests | `python -m pytest tests/direct -q` → **35 passed** |
 | Keystore Tests | `python -m pytest tests/test_deployer_keystore.py -v` → **13 passed** |
-| Live on-chain smoke | Verified on Studio Next: PyPI & npm escrows created, cancel/refund executed |
+| Live on-chain smoke | Verified on Studio Next: PyPI & npm 404 escrows, cancel/refund, candidate release escrows ([EVIDENCE.md](./EVIDENCE.md)) |
+| Steward Evidence | [EVIDENCE.md](./EVIDENCE.md) · [steward_evidence.json](./scripts/steward_evidence.json) |
 
 ## Historical Deployments (Archive)
 | Version | Address | Explorer Link | Status |
@@ -78,7 +79,7 @@ python -m pytest tests/direct -q
 Covered: hash IDs, 24h / 14d gates, latest/url reject, funder≠recipient, lookback published / yanked / 404, funder cannot release, cancel before start, cancel after start reverts, release before window, RELEASED, yanked and 404 → REFUND_NOHIT, 5xx and non-JSON → INSUFFICIENT, double release, expire bounds, fake id, withdraw ordering, list_ids, economics.
 Full matrix: [TESTCASES.md](./TESTCASES.md)
 
-## Live smoke on Studio Next (Chain 61997)
+## Live smoke & steward evidence on Studio Next (Chain 61997)
 | Step | Action | Tx Hash | Result |
 |---|---|---|---|
 | Contract Deploy | Deploy `contracts/shiplock.py` | `0x3f7e83337967b194e40fea35a4f8abea7f99a05890a422d2d89096052e2a5854` | FINALIZED, FINISHED_WITH_RETURN |
@@ -86,9 +87,12 @@ Full matrix: [TESTCASES.md](./TESTCASES.md)
 | Fund PyPI 404 | `fund_escrow` (`shiplock-smoke-does-not-exist`) | `0x6a307ceab940e184215b576e5826c8f361e2fabe3f9eea4f6769cb6533ac7312` | OPEN, 0.02 GEN, LOOKBACK_404_OK |
 | Fund npm 404 | `fund_escrow` (`shiplock-smoke-does-not-exist-npm`) | `0xd25c4478f9bea148882fabc24620116aaa3d8281280e72115227b49aa2f9d617` | OPEN, 0.02 GEN, LOOKBACK_404_OK |
 | Cancel & Refund | `cancel` (`shiplock-smoke-cancel-target`) | `0xdb6d919c7b4462d479917e8df1783a6a087053c80e24bf5bce2600f0fc56ab4e` | CANCELED, 0.01 GEN refunded |
-| Verify Accounting | `get_economics()` | RPC Query | 0.04 GEN open, 0.01 GEN refunded |
+| Fund PyPI Candidate | `fund_escrow` (`shiplock-steward-release-live`) | `0x0f09d23831be1fb344b135c09cb674529e4caa5c607fe665988b5da80d342cc6` | OPEN, 0.01 GEN, LOOKBACK_404_OK |
+| Fund npm Candidate | `fund_escrow` (`shiplock-steward-release-live`) | `0xb627438c2bb6190960b9eea4c4acb8f09847e14aa02e0b4b219056437bd30a01` | OPEN, 0.01 GEN, LOOKBACK_404_OK |
+| Verify Accounting | `get_economics()` | RPC Query | 0.06 GEN open, 0.01 GEN refunded |
 
-> Time-gated release/refund tests require `now >= window_start` (+24h gate). Active funded test escrows remain OPEN on-chain ready for release tests after `2026-10-12 10:33:18 UTC`.
+> Complete reproducible report, time-gate windows, and cleanup audit: [EVIDENCE.md](./EVIDENCE.md).
+> Time-gated release/refund tests require `now >= window_start` (+24h gate). Active funded test escrows remain OPEN on-chain ready for in-window checks after `2026-10-12 10:33:18 UTC` and final refund after `2026-10-14 10:33:18 UTC`.
 
 ## Local app
 ```bash

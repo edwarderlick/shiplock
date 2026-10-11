@@ -9,11 +9,6 @@ def load_fix(name: str) -> str:
     if not name.endswith('.json') and not name.endswith('.txt'):
         name += '.json'
     fix_path = FIXTURES_DIR / name
-    if not fix_path.exists():
-        # Fallback to tests/fixtures
-        fallback = Path(__file__).resolve().parents[1] / "fixtures" / name
-        if fallback.exists():
-            return fallback.read_text(encoding="utf-8")
     return fix_path.read_text(encoding="utf-8")
 
 class MockResponse:

@@ -10,6 +10,7 @@
 - **Active Deployment Tx**: [`0x3f7e83337967b194e40fea35a4f8abea7f99a05890a422d2d89096052e2a5854`](https://explorer-studio-dev.genlayer.com/tx/0x3f7e83337967b194e40fea35a4f8abea7f99a05890a422d2d89096052e2a5854)
 - **Deployer Public Address**: `0x20E850BAaD26d763d4f691780D1BEBA01c8D6084`
 - **Contract Source Hash**: `be743c1a8277716d21018911352fe9d7ccd3dd30fb1b8d829d19384133401a0e` (Verified 100% on-chain parity)
+- **Steward Evidence & Report**: [EVIDENCE.md](./EVIDENCE.md)
 
 ---
 
