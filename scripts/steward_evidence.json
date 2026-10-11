@@ -155,8 +155,25 @@
     "currentProductionDeploymentId": "dpl_FhKBHcRTUzxcE1TD6W5CLbewKpAK",
     "productionUrl": "https://shiplock-chi.vercel.app/"
   },
+  "mode1FeeFixVerification": {
+    "failedCancelTxHash": "0x8c1d12c570b863fda838950cc09d1b9881a0fb9bd28b66915e4e3e722dda5e68",
+    "targetEscrowId": "0x7f24e638ea5ed353c377f968352fdf9d2e1c66959fa739fa69d1d32e54d58d53",
+    "funder": "0x7E4E1f7DcC3DA063F9110477Ad348C90E8599253",
+    "principalLockedWei": "2000000000000000000",
+    "errorReason": "Mode1MessageFeesRequireGenVMPerEmissionSupport: fee-bearing GenVM messages require a message allocation tree",
+    "preflightSimulationResult": "SUCCESS",
+    "preflightEmittedMessagesCount": 1,
+    "preflightEmittedValueWei": "2000000000000000000",
+    "preflightMessageFeeBudgetWei": "150000000000000",
+    "preflightMessageFeeConsumedWei": "125000000000000",
+    "escrowStatus": "OPEN",
+    "timeRemainingBeforeWindow": "in_window_pending",
+    "windowStartUtc": "2026-10-12T16:17:31Z",
+    "connectedWalletIsFunder": false,
+    "escrowPreservedForLaterSettlementOrBrowserCancel": true
+  },
   "economics": {
-    "escrowedOpenWei": "70000000000000000",
+    "escrowedOpenWei": "2070000000000000000",
     "outstandingCreditsWei": "0",
     "paidToRecipientsWei": "0",
     "refundedToFundersWei": "10000000000000000",

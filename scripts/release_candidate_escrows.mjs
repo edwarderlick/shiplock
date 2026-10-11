@@ -237,17 +237,24 @@ async function main() {
       record: cand,
       stepKey: "releaseAttempt",
       submitFn: async () => {
-        const feeEst = await writeClient.estimateTransactionFees({
-          leaderTimeunitsAllocation: 150n,
-          validatorTimeunitsAllocation: 300n,
+        const feeEst = await writeClient.estimateTransactionFeesForWrite({
+          address: CONTRACT_ADDRESS,
+          functionName: "release",
+          args: [cand.id],
+          leaderTimeunitsAllocation: 200n,
+          validatorTimeunitsAllocation: 400n,
           rotations: [0n],
         });
+        if (!feeEst.messageAllocations || feeEst.messageAllocations.length === 0) {
+          throw new Error(`Failed to estimate message allocations for candidate release payout of ${cand.id}`);
+        }
         return await writeClient.writeContract({
           address: CONTRACT_ADDRESS,
           functionName: "release",
           args: [cand.id],
           fees: {
             distribution: feeEst.distribution,
+            messageAllocations: feeEst.messageAllocations,
             feeValue: feeEst.feeValue,
           },
         });

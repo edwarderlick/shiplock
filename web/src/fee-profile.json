@@ -20,31 +20,31 @@
       "rotationsPerRound": "1"
     },
     "cancel": {
-      "leaderTimeunitsAllocation": "125",
-      "validatorTimeunitsAllocation": "250",
+      "leaderTimeunitsAllocation": "200",
+      "validatorTimeunitsAllocation": "400",
       "executionBudgetPerRound": "25000000000000000",
-      "totalMessageFees": "1000000000000000",
+      "totalMessageFees": "0",
       "rotationsPerRound": "1"
     },
     "release": {
       "leaderTimeunitsAllocation": "200",
       "validatorTimeunitsAllocation": "400",
       "executionBudgetPerRound": "25000000000000000",
-      "totalMessageFees": "1000000000000000",
+      "totalMessageFees": "0",
       "rotationsPerRound": "1"
     },
     "expire": {
-      "leaderTimeunitsAllocation": "125",
-      "validatorTimeunitsAllocation": "250",
+      "leaderTimeunitsAllocation": "200",
+      "validatorTimeunitsAllocation": "400",
       "executionBudgetPerRound": "25000000000000000",
-      "totalMessageFees": "1000000000000000",
+      "totalMessageFees": "0",
       "rotationsPerRound": "1"
     },
     "withdraw": {
-      "leaderTimeunitsAllocation": "125",
-      "validatorTimeunitsAllocation": "250",
+      "leaderTimeunitsAllocation": "200",
+      "validatorTimeunitsAllocation": "400",
       "executionBudgetPerRound": "25000000000000000",
-      "totalMessageFees": "1000000000000000",
+      "totalMessageFees": "0",
       "rotationsPerRound": "1"
     }
   }

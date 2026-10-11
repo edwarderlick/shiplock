@@ -1,7 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { createClient, isSuccessful } from "genlayer-js";
 import { studioDevnet } from "genlayer-js/chains";
-import { createTransactionKit } from "@genlayer/transaction-kit";
 import { CONTRACT_ADDRESS, CHAIN_ID } from "./env";
 import feeProfile from "../fee-profile.json";
 
@@ -27,6 +26,8 @@ function profileFor(functionName: string) {
 export const MIN_PHASE_TIMEOUT = 30n;
 export const MAX_PHASE_TIMEOUT = 600n;
 
+export const TRANSFER_METHODS = new Set(["cancel", "release", "expire", "withdraw"]);
+
 export function validatePhaseAllocations(distribution: {
   leaderTimeunitsAllocation?: string | number | bigint;
   validatorTimeunitsAllocation?: string | number | bigint;
@@ -47,6 +48,47 @@ export function validatePhaseAllocations(distribution: {
     throw new Error(
       `Validator phase allocation (${validator}) out of bounds: must be between ${MIN_PHASE_TIMEOUT} and ${MAX_PHASE_TIMEOUT} timeunits`
     );
+  }
+}
+
+export function validateTransferAllocations({
+  functionName,
+  distribution,
+  messageAllocations,
+  mustHaveTransfer = false,
+}: {
+  functionName: string;
+  distribution?: any;
+  messageAllocations?: any[];
+  mustHaveTransfer?: boolean;
+}): void {
+  const totalMessageFees = BigInt(distribution?.totalMessageFees ?? 0);
+  const hasAllocations = Array.isArray(messageAllocations) && messageAllocations.length > 0;
+
+  // Nonzero totalMessageFees with an empty allocation tree is invalid
+  if (totalMessageFees > 0n && !hasAllocations) {
+    throw new Error(
+      `Invalid fee parameters for ${functionName}: nonzero totalMessageFees (${totalMessageFees}) requires a non-empty messageAllocations tree.`
+    );
+  }
+
+  // If a transfer is mandatory for this call (cancel, expire, withdraw):
+  if (mustHaveTransfer && !hasAllocations) {
+    throw new Error(
+      `Fee estimation cannot produce a valid message allocation for transfer in ${functionName}. Aborting before wallet signing.`
+    );
+  }
+
+  if (hasAllocations) {
+    for (let i = 0; i < messageAllocations!.length; i++) {
+      const alloc = messageAllocations![i];
+      if (!alloc || !alloc.recipient || typeof alloc.recipient !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(alloc.recipient.trim())) {
+        throw new Error(`Message allocation at index ${i} has invalid recipient: ${alloc?.recipient}`);
+      }
+      if (BigInt(alloc.budget ?? 0) <= 0n) {
+        throw new Error(`Message allocation at index ${i} has non-positive budget: ${alloc?.budget}`);
+      }
+    }
   }
 }
 
@@ -145,27 +187,32 @@ export async function writeIc({
   onProgress?.("ESTIMATING FEES");
 
   let distribution: any;
-  let feeValue: bigint;
+  let feeValue: bigint = 0n;
+  let messageAllocations: any = undefined;
+
+  const prof = profileFor(functionName);
+  const leaderAlloc = BigInt(prof.leaderTimeunitsAllocation ?? "200");
+  const validatorAlloc = BigInt(prof.validatorTimeunitsAllocation ?? "400");
+  validatePhaseAllocations({
+    leaderTimeunitsAllocation: leaderAlloc,
+    validatorTimeunitsAllocation: validatorAlloc,
+  });
+
+  const isTransferCall = TRANSFER_METHODS.has(functionName);
 
   let quote: any = null;
-  try {
-    const kit = injectedKit ?? createTransactionKit({
-      chain: studioDevnet,
-      provider: provider ?? { request: async () => null },
-      account: wallet,
-      suggestions: feeProfile as any,
-    });
-    quote = await kit.estimate(
-      { preset: "standard", userValue: value ?? 0n },
-      { kind: "write", address: contract, method: functionName, args }
-    );
-  } catch (kitErr: any) {
-    // Fail-closed: allow SDK estimate fallback ONLY for clearly identified temporary network/transport failures
-    if (isTemporaryNetworkOrTransportError(kitErr)) {
-      console.warn("TransactionKit estimate fallback (temporary network/transport failure):", kitErr);
-    } else {
-      // Propagate configuration, policy, verification, and unexpected errors
-      throw kitErr;
+  if (injectedKit) {
+    try {
+      quote = await injectedKit.estimate(
+        { preset: "standard", userValue: value ?? 0n },
+        { kind: "write", address: contract, method: functionName, args }
+      );
+    } catch (kitErr: any) {
+      if (isTemporaryNetworkOrTransportError(kitErr)) {
+        console.warn("TransactionKit estimate fallback (temporary network/transport failure):", kitErr);
+      } else {
+        throw kitErr;
+      }
     }
   }
 
@@ -177,15 +224,51 @@ export async function writeIc({
     }
     distribution = quote.distribution;
     feeValue = quote.feeValue;
-  } else {
-    // Network unavailable fallback: estimate via client
-    const prof = profileFor(functionName);
-    const leaderAlloc = BigInt(prof.leaderTimeunitsAllocation ?? "200");
-    const validatorAlloc = BigInt(prof.validatorTimeunitsAllocation ?? "400");
-    validatePhaseAllocations({
-      leaderTimeunitsAllocation: leaderAlloc,
-      validatorTimeunitsAllocation: validatorAlloc,
-    });
+    messageAllocations = quote.messageAllocations;
+  }
+
+  // Use client.estimateTransactionFeesForWrite (Studio simulation / supported estimation):
+  // Required whenever messageAllocations is missing for a transfer call, or when quote wasn't provided
+  if (!distribution || (isTransferCall && (!messageAllocations || messageAllocations.length === 0))) {
+    if (typeof client?.estimateTransactionFeesForWrite === "function") {
+      try {
+        const callerAccount = { address: wallet };
+        const writeEst = await client.estimateTransactionFeesForWrite({
+          account: callerAccount,
+          address: contract,
+          functionName,
+          args,
+          value: value ?? 0n,
+          leaderTimeunitsAllocation: leaderAlloc,
+          validatorTimeunitsAllocation: validatorAlloc,
+          rotations: [BigInt(prof.rotationsPerRound ?? "1")],
+        });
+        distribution = writeEst.distribution;
+        feeValue = writeEst.feeValue;
+        messageAllocations = writeEst.messageAllocations;
+      } catch (estErr: any) {
+        if (isTransferCall) {
+          // If estimation cannot produce a valid allocation for a transfer, stop before wallet signing; never silently use the generic fallback
+          throw new Error(
+            `Fee estimation cannot produce a valid message allocation for transfer in ${functionName}: ${estErr.message || estErr}. Aborting before wallet signing.`
+          );
+        }
+        if (isTemporaryNetworkOrTransportError(estErr)) {
+          console.warn("estimateTransactionFeesForWrite network fallback:", estErr);
+        } else {
+          throw estErr;
+        }
+      }
+    }
+  }
+
+  // Generic fallback: ONLY allowed for non-transfer calls on temporary network error
+  if (!distribution) {
+    if (isTransferCall) {
+      throw new Error(
+        `Fee estimation cannot produce a valid message allocation for transfer in ${functionName}. Aborting before wallet signing.`
+      );
+    }
     const fallbackEst = await client.estimateTransactionFees({
       leaderTimeunitsAllocation: leaderAlloc,
       validatorTimeunitsAllocation: validatorAlloc,
@@ -193,10 +276,20 @@ export async function writeIc({
     });
     distribution = fallbackEst.distribution;
     feeValue = fallbackEst.feeValue;
+    messageAllocations = fallbackEst.messageAllocations;
   }
 
   // Validate phase allocation bounds (30-600) before wallet signing or transaction submission
   validatePhaseAllocations(distribution);
+
+  // Validate transfer message allocations before wallet signing
+  const mustHaveTransfer = ["cancel", "expire", "withdraw"].includes(functionName);
+  validateTransferAllocations({
+    functionName,
+    distribution,
+    messageAllocations,
+    mustHaveTransfer,
+  });
 
   const preWriteLog = {
     wallet,
@@ -225,6 +318,7 @@ export async function writeIc({
     value: value ?? 0n,
     fees: {
       distribution,
+      messageAllocations,
       feeValue,
     },
   });

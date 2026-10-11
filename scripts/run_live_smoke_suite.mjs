@@ -339,11 +339,18 @@ async function main() {
 
   // Now execute permissible cancel (funder calling before window_start)
   console.log(`[*] Executing cancel(${expectedCancelId}) as funder before window_start...`);
-  const cancelFeeEst = await client.estimateTransactionFees({
-    leaderTimeunitsAllocation: 100n,
-    validatorTimeunitsAllocation: 200n,
+  const cancelFeeEst = await client.estimateTransactionFeesForWrite({
+    address: CONTRACT_ADDRESS,
+    functionName: "cancel",
+    args: [expectedCancelId],
+    leaderTimeunitsAllocation: 200n,
+    validatorTimeunitsAllocation: 400n,
     rotations: [0n],
   });
+
+  if (!cancelFeeEst.messageAllocations || cancelFeeEst.messageAllocations.length === 0) {
+    throw new Error(`Failed to estimate message allocations for cancel transfer of escrow ${expectedCancelId}`);
+  }
 
   const cancelTxHash = await client.writeContract({
     address: CONTRACT_ADDRESS,
@@ -351,6 +358,7 @@ async function main() {
     args: [expectedCancelId],
     fees: {
       distribution: cancelFeeEst.distribution,
+      messageAllocations: cancelFeeEst.messageAllocations,
       feeValue: cancelFeeEst.feeValue,
     },
   });

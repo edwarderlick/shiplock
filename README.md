@@ -69,13 +69,26 @@ Views: `get_escrow` · `list_ids` · `get_economics` · `get_credit`
 
 Fees (frontend):
 ```typescript
+// Non-transfer writes (e.g. fund_escrow):
 estimateTransactionFees({
   leaderTimeunitsAllocation: 200n,
   validatorTimeunitsAllocation: 400n,
   rotations: [1n],
-})
+});
+
+// Transfer writes (cancel, release, expire, withdraw):
+// GenLayer Mode 1 requires messageAllocations matching emitted messages:
+const { distribution, messageAllocations, feeValue } = await client.estimateTransactionFeesForWrite({
+  address: CONTRACT_ADDRESS,
+  functionName: "cancel",
+  args: [escrowId],
+  account: wallet,
+  leaderTimeunitsAllocation: 200n,
+  validatorTimeunitsAllocation: 400n,
+});
+// Passed to writeContract with messageAllocations preserved
 ```
-Studio Next consensus bounds phase timeouts to 30–600 timeunits. Allocations outside this range (e.g. 800) revert with `PhaseTimeoutOutOfBounds(alloc,30,600)`.
+Studio Next consensus bounds phase timeouts to 30–600 timeunits. Allocations outside this range (e.g. 800) revert with `PhaseTimeoutOutOfBounds(alloc,30,600)`. Any fee-bearing emission requires an explicit message allocation tree.
 
 ## Automated tests
 ```bash
@@ -96,10 +109,11 @@ Full matrix: [TESTCASES.md](./TESTCASES.md)
 | Fund PyPI Candidate | `fund_escrow` (`shiplock-steward-release-live`) | `0x0f09d23831be1fb344b135c09cb674529e4caa5c607fe665988b5da80d342cc6` | OPEN, 0.01 GEN, LOOKBACK_404_OK |
 | Fund npm Candidate | `fund_escrow` (`shiplock-steward-release-live`) | `0xb627438c2bb6190960b9eea4c4acb8f09847e14aa02e0b4b219056437bd30a01` | OPEN, 0.01 GEN, LOOKBACK_404_OK |
 | Live Funding Proof | `fund_escrow` (`shiplock-live-verify-phase`) | `0xd6f0881c7ac0a3d6f30306e54cc46136c10d3b1a43c46e1c92ab8793e8f55190` | OPEN, 0.01 GEN, LOOKBACK_404_OK |
-| Verify Accounting | `get_economics()` | RPC Query | 0.07 GEN open, 0.01 GEN refunded |
+| Manual Smoke Lock | `fund_escrow` (`shiplock-manual-smoke-20261011-samir`) | `0x7f24e638ea5ed353c377f968352fdf9d2e1c66959fa739fa69d1d32e54d58d53` | OPEN, 2.00 GEN locked (Preflight verified) |
+| Verify Accounting | `get_economics()` | RPC Query | 2.07 GEN open, 0.01 GEN refunded |
 
 > Historical snapshot (pre-funding-proof, 2026-10-11 11:38 UTC): 0.06 GEN open (`60000000000000000 wei`), 0.01 GEN refunded.  
-> Active on-chain snapshot (post-funding-proof, 2026-10-11 13:38 UTC): 0.07 GEN open (`70000000000000000 wei`), 0.01 GEN refunded.
+> Active on-chain snapshot (post-manual-lock, 2026-10-11 14:48 UTC): 2.07 GEN open (`2070000000000000000 wei`), 0.01 GEN refunded.
 
 > Complete reproducible report, time-gate windows, and cleanup audit: [EVIDENCE.md](./EVIDENCE.md).
 > Time-gated release/refund tests require `now >= window_start` (+24h gate). Active funded test escrows remain OPEN on-chain ready for in-window checks after `2026-10-12 10:33:18 UTC` and final refund after `2026-10-14 10:33:18 UTC`.

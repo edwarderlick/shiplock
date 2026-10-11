@@ -24,12 +24,13 @@ ShipLock is an immutable, time-gated package publication escrow deployed to GenL
 
 ### Live On-Chain Economics (`get_economics()`)
 Snapshot read directly from contract `0x7Cef756668Cd925807e8B110D0330643c6F809E3`:
-- **`escrowed_open`**: `0.07 GEN` (`70000000000000000 wei`)
+- **`escrowed_open`**: `2.07 GEN` (`2070000000000000000 wei`)
   - PyPI 404 Smoke Escrow: `0.02 GEN` (`0x1ac2eea7...`)
   - npm 404 Smoke Escrow: `0.02 GEN` (`0x6a335be1...`)
   - PyPI Release Candidate Escrow: `0.01 GEN` (`0xdc2dfac8...`)
   - npm Release Candidate Escrow: `0.01 GEN` (`0x3c46e617...`)
   - Live Funding Proof Escrow: `0.01 GEN` (`0x632b64ce...`)
+  - Manual Smoke Escrow: `2.00 GEN` (`0x7f24e638...`)
 - **`refunded_to_funders`**: `0.01 GEN` (`10000000000000000 wei` from canceled escrow `0xd450d74c...`)
 - **`paid_to_recipients`**: `0.00 GEN`
 - **`outstanding_credits`**: `0.00 GEN`
@@ -50,6 +51,7 @@ The following transactions and escrows have been audited against scripts and ver
 | **PyPI Release Cand.** | `shiplock-steward-release-live` @ `1.0.0` | `0xdc2dfac88f9a7dbc2615c3a2338cd12819efca660352c1d1c8b6f530ed5f9c1a` | Fund: [`0x0f09d238...`](https://explorer-studio-dev.genlayer.com/tx/0x0f09d23831be1fb344b135c09cb674529e4caa5c607fe665988b5da80d342cc6) | `OPEN` (0.01 GEN locked, `LOOKBACK_404_OK`) |
 | **npm Release Cand.** | `shiplock-steward-release-live` @ `1.0.0` | `0x3c46e617d6541f63e69f783c0a481f429bb9c7e08509274ebbef25fc1b8444ad` | Fund: [`0xb627438c...`](https://explorer-studio-dev.genlayer.com/tx/0xb627438c2bb6190960b9eea4c4acb8f09847e14aa02e0b4b219056437bd30a01) | `OPEN` (0.01 GEN locked, `LOOKBACK_404_OK`) |
 | **Live Funding Proof** | `shiplock-live-verify-phase` @ `1.0.0` | `0x632b64ce06e117d2dc11da291e031f82844fa29d25e841b95f4f33734b30270c` | Fund: [`0xd6f0881c...`](https://explorer-studio-dev.genlayer.com/tx/0xd6f0881c7ac0a3d6f30306e54cc46136c10d3b1a43c46e1c92ab8793e8f55190) | `OPEN` (0.01 GEN locked, `LOOKBACK_404_OK`, economics increased from 0.06 to 0.07 GEN) |
+| **Manual Smoke Lock** | `shiplock-manual-smoke-20261011-samir` @ `1.0.1` | `0x7f24e638ea5ed353c377f968352fdf9d2e1c66959fa739fa69d1d32e54d58d53` | Failed Cancel: [`0x8c1d12c5...`](https://explorer-studio-dev.genlayer.com/tx/0x8c1d12c570b863fda838950cc09d1b9881a0fb9bd28b66915e4e3e722dda5e68) | `OPEN` (2.00 GEN locked, economics increased from 0.07 to 2.07 GEN; preserved for funder) |
 
 *Correction Note*: The canceled escrow ID was verified on-chain as `0xd450d74c9eee0d8ff4d92983bfc79ee55f01ef3609c4e6d0dd5fcb0c8867c2a3` (correcting a prior documentation typo).
 
@@ -105,6 +107,38 @@ The following transactions and escrows have been audited against scripts and ver
    - **On-Chain Escrow Status**: `OPEN` (`LOOKBACK_404_OK`)
    - **Principal Locked**: `0.01 GEN` (`10000000000000000 wei`)
    - **Economics Delta**: `escrowed_open` increased from `0.06 GEN` (`60000000000000000 wei`) to `0.07 GEN` (`70000000000000000 wei`). All other economics categories unchanged.
+
+4. **Mode 1 Transfer Fee Failure Inspection, Preflight Simulation & Allocation Tree Verification**:
+   - **Failed Cancel Transaction**: [`0x8c1d12c570b863fda838950cc09d1b9881a0fb9bd28b66915e4e3e722dda5e68`](https://explorer-studio-dev.genlayer.com/tx/0x8c1d12c570b863fda838950cc09d1b9881a0fb9bd28b66915e4e3e722dda5e68)
+   - **Target Escrow**: `0x7f24e638ea5ed353c377f968352fdf9d2e1c66959fa739fa69d1d32e54d58d53` (`OPEN`, 2.00 GEN locked)
+   - **Funder Account**: `0x7E4E1f7DcC3DA063F9110477Ad348C90E8599253`
+   - **Receipt Status & Error**: Status `FINALIZED`, Execution `ERROR`, GenVM stderr:
+     `Mode1MessageFeesRequireGenVMPerEmissionSupport: fee-bearing GenVM messages require a message allocation tree`
+   - **Emission & Fee Trace Audit**:
+     Traced every write method capable of calling `emit_transfer`:
+     - `cancel(id)`: refunds funder when called before `window_start`
+     - `release(id)`: pays recipient if valid in-window publication is verified
+     - `release(id)`: refunds funder if absent/unreleased at or after `window_end` (`REFUND_NOHIT`)
+     - `expire(id)`: refunds funder after expiration
+     - `withdraw()`: transfers accumulated credit to caller
+     *Audit finding*: Frontend static fee profiles had specified nonzero `totalMessageFees: "1000000000000000"` with no allocations; `web/src/lib/write.ts` and evidence runners submitted only `distribution` and `feeValue`, dropping `messageAllocations`.
+   - **Implementation & Allocation Tree Preservation**:
+     - Corrected `fee-profile.json` and `web/src/fee-profile.json` (`totalMessageFees: "0"`).
+     - Added `validateTransferAllocations` to `web/src/lib/write.ts`, rejecting nonzero `totalMessageFees` with empty trees and enforcing positive budget allocations for transfer calls.
+     - Upgraded `writeIc` and evidence runners to compute fees via supported `client.estimateTransactionFeesForWrite` (Studio devnet simulation) for the concrete call and recipient.
+     - Preserves and submits `messageAllocations` alongside `distribution` and `feeValue` to `writeContract`. Fails closed before wallet signing if estimation cannot produce valid allocations (never falls back to generic estimation).
+     - Preserved phase timeouts strictly within `[30, 600]` (leader: 200, validator: 400).
+   - **Studio Next Preflight Simulation (Without Submitting On-Chain)**:
+     - Query: `client.estimateTransactionFeesForWrite` and `simulateWriteContract` with `includeReceipt: true` on contract `0x7Cef756668Cd925807e8B110D0330643c6F809E3`, method `cancel("0x7f24...")`, sender `0x7E4E1f7DcC3DA063F9110477Ad348C90E8599253`.
+     - Execution Result: `SUCCESS` (stderr empty)
+     - Emitted message: 1 message emitting native transfer of `2000000000000000000 wei` (2.0 GEN) to `0x7E4E1f7DcC3DA063F9110477Ad348C90E8599253`.
+     - Fee Accounting: `genvm_message_fee_consumed: 125000000000000 wei`, `message_fee_budget: 150000000000000 wei`, `submitted_messages_count: 1` (672 bytes).
+     - Generated Allocation: `recipient: "0x7e4e1f7dcc3da063f9110477ad348c90e8599253"`, `budget: "150000000000000"`, `callKey: "0x0000000000000000000000000000000000000000000000000000000000000000"`.
+   - **Live Attempt Authorization & Escrow Preservation**:
+     - Time gate check: Current on-chain time (`1791730069` / `2026-10-11T14:48Z`) is before window start / cancel deadline (`2026-10-12 16:17:31 UTC`).
+     - Authorization check: Under `contracts/shiplock.py` line 674, `cancel` strictly requires `sender == e.funder`. The connected wallet in the local environment is `shiplock-deployer-live` (`0x20E850BAaD26d763d4f691780D1BEBA01c8D6084`), not the funder (`0x7E4E1f7DcC3DA063F9110477Ad348C90E8599253`).
+     - In strict adherence to prompt criteria ("only if on-chain time is still before 2026-10-12 16:17:31 UTC and the connected wallet is its funder"), unauthorized cancel submission is withheld.
+     - Escrow `0x7f24...` remains safely `OPEN` on-chain with 2.0 GEN locked, preserved for user browser cancel via the updated frontend or its later settlement path.
 
 ---
 
@@ -231,8 +265,8 @@ Registry credentials must never be passed in command arguments, chat, logs, or c
 |---|---|---|
 | `python -m pytest tests/direct -q` | Direct contract unit tests | **35 passed** |
 | `python -m pytest tests/test_deployer_keystore.py -v` | Keystore & address preservation | **13 passed** |
-| `node --test tests/test_evidence_harness.mjs` | PyPI urls parsing, fail-closed candidate release, baseline snapshots, recovery, strict early 404 retryable, temporary failure attempt history & retry lifecycle, distinct early-404 vs refund settlement flags, on-chain cross-boundary refund settlement | **27 passed** |
-| `npm --prefix web test` | Frontend flow & contract runtime tests (including 6 phase timeout & fee bounds tests) | **51 passed** |
+| `node --test tests/test_evidence_harness.mjs` | PyPI urls parsing, candidate release, baseline snapshots, recovery, strict early 404, temporary failure retry lifecycle, refund settlement, Mode 1 message fee allocations | **31 passed** |
+| `npm --prefix web test` | Frontend flow & contract runtime tests (including phase timeout bounds & Section 7 Mode 1 transfer fee allocation tests) | **65 passed** |
 | `npm --prefix web run lint` | ESLint static analysis | **0 errors** |
 | `npm --prefix web run build` | Next.js production build | **Compiled successfully** |
 | `https://shiplock-chi.vercel.app/` | Live Vercel production deployment | **Verified live** |

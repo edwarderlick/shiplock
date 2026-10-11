@@ -38,6 +38,8 @@ import {
   assertAddress,
   isTemporaryNetworkOrTransportError,
   validatePhaseAllocations,
+  validateTransferAllocations,
+  TRANSFER_METHODS,
   MIN_PHASE_TIMEOUT,
   MAX_PHASE_TIMEOUT
 } from "../src/lib/write";
@@ -997,6 +999,592 @@ describe("ShipLock Phase 2 - Production Contract Integration & Runtime Flow", ()
       assert.equal(capturedFeesRelease.distribution.validatorTimeunitsAllocation, 400n);
       assert.ok(capturedFeesRelease.distribution.leaderTimeunitsAllocation >= 30n && capturedFeesRelease.distribution.leaderTimeunitsAllocation <= 600n);
       assert.ok(capturedFeesRelease.distribution.validatorTimeunitsAllocation >= 30n && capturedFeesRelease.distribution.validatorTimeunitsAllocation <= 600n);
+    });
+  });
+
+  describe("7. Mode 1 Message Fees, Allocation Tree & Transfer Methods Verification", () => {
+    const funder = "0x1111111111111111111111111111111111111111";
+    const recipient = "0x2222222222222222222222222222222222222222";
+    const escrowId = "0x7f24e638ea5ed353c377f968352fdf9d2e1c66959fa739fa69d1d32e54d58d53";
+
+    const mockProvider = {
+      request: async ({ method }: any) => {
+        if (method === "eth_chainId") return "0xf22d"; // 61997
+        return null;
+      },
+    };
+
+    test("TRANSFER_METHODS traces every write that can call emit_transfer (cancel, release, expire, withdraw)", () => {
+      assert.equal(TRANSFER_METHODS.has("cancel"), true, "cancel can call emit_transfer");
+      assert.equal(TRANSFER_METHODS.has("release"), true, "release can call emit_transfer");
+      assert.equal(TRANSFER_METHODS.has("expire"), true, "expire can call emit_transfer");
+      assert.equal(TRANSFER_METHODS.has("withdraw"), true, "withdraw can call emit_transfer");
+      assert.equal(TRANSFER_METHODS.has("fund_escrow"), false, "fund_escrow does not call emit_transfer");
+    });
+
+    test("validateTransferAllocations reproduces failed quote: rejects nonzero totalMessageFees with empty allocation tree", () => {
+      // Exact setting from failed transaction: totalMessageFees = 1000000000000000 without allocations
+      assert.throws(
+        () => {
+          validateTransferAllocations({
+            functionName: "cancel",
+            distribution: {
+              leaderTimeunitsAllocation: 200n,
+              validatorTimeunitsAllocation: 400n,
+              totalMessageFees: 1000000000000000n,
+            },
+            messageAllocations: [],
+          });
+        },
+        /nonzero totalMessageFees \(1000000000000000\) requires a non-empty messageAllocations tree/
+      );
+
+      assert.throws(
+        () => {
+          validateTransferAllocations({
+            functionName: "release",
+            distribution: {
+              leaderTimeunitsAllocation: 200n,
+              validatorTimeunitsAllocation: 400n,
+              totalMessageFees: 150000000000000n,
+            },
+            messageAllocations: undefined,
+          });
+        },
+        /nonzero totalMessageFees \(150000000000000\) requires a non-empty messageAllocations tree/
+      );
+    });
+
+    test("validateTransferAllocations enforces mandatory transfers for cancel, expire, and withdraw", () => {
+      for (const fn of ["cancel", "expire", "withdraw"]) {
+        assert.throws(
+          () => {
+            validateTransferAllocations({
+              functionName: fn,
+              distribution: {
+                leaderTimeunitsAllocation: 200n,
+                validatorTimeunitsAllocation: 400n,
+                totalMessageFees: 0n,
+              },
+              messageAllocations: [],
+              mustHaveTransfer: true,
+            });
+          },
+          new RegExp(`Fee estimation cannot produce a valid message allocation for transfer in ${fn}`)
+        );
+      }
+    });
+
+    test("validateTransferAllocations validates recipient format and positive budget", () => {
+      assert.throws(
+        () => {
+          validateTransferAllocations({
+            functionName: "cancel",
+            distribution: { totalMessageFees: 100n },
+            messageAllocations: [{ recipient: "invalid-address", budget: 100n }],
+          });
+        },
+        /invalid recipient/
+      );
+
+      assert.throws(
+        () => {
+          validateTransferAllocations({
+            functionName: "cancel",
+            distribution: { totalMessageFees: 100n },
+            messageAllocations: [{ recipient: funder, budget: 0n }],
+          });
+        },
+        /non-positive budget/
+      );
+    });
+
+    test("writeIc reproduces failed quote: stops before wallet signing and never calls writeContract", async () => {
+      let writeContractCalled = false;
+      const mockClient = {
+        account: funder,
+        writeContract: async () => {
+          writeContractCalled = true;
+          return "0xtx_should_never_be_called";
+        },
+      };
+
+      const mockFailedQuoteKit = {
+        estimate: async () => ({
+          distribution: {
+            leaderTimeunitsAllocation: 200n,
+            validatorTimeunitsAllocation: 400n,
+            totalMessageFees: 1000000000000000n, // Nonzero without allocations
+          },
+          feeValue: 5000000n,
+          messageAllocations: [], // Empty allocation tree!
+          verification: { status: "verified" as const },
+        }),
+      };
+
+      await assert.rejects(
+        async () => {
+          await writeIc({
+            account: funder,
+            provider: mockProvider,
+            functionName: "cancel",
+            args: [escrowId],
+            client: mockClient,
+            transactionKit: mockFailedQuoteKit,
+          });
+        },
+        /nonzero totalMessageFees \(1000000000000000\) requires a non-empty messageAllocations tree/
+      );
+
+      assert.equal(writeContractCalled, false, "writeContract must NEVER be called with invalid empty allocation tree");
+    });
+
+    test("writeIc transfer call: stops before wallet signing if estimation cannot produce valid allocations", async () => {
+      let writeContractCalled = false;
+      const mockClient = {
+        account: funder,
+        estimateTransactionFeesForWrite: async () => {
+          throw new Error("RPC simulation error: contract execution failed");
+        },
+        estimateTransactionFees: async () => {
+          // Generic fallback must NEVER be used for transfer call!
+          return {
+            distribution: { leaderTimeunitsAllocation: 200n, validatorTimeunitsAllocation: 400n },
+            feeValue: 1000n,
+          };
+        },
+        writeContract: async () => {
+          writeContractCalled = true;
+          return "0xtx";
+        },
+      };
+
+      await assert.rejects(
+        async () => {
+          await writeIc({
+            account: funder,
+            provider: mockProvider,
+            functionName: "cancel",
+            args: [escrowId],
+            client: mockClient,
+          });
+        },
+        /Fee estimation cannot produce a valid message allocation for transfer in cancel/
+      );
+
+      assert.equal(writeContractCalled, false, "Must abort before wallet signing; never use generic fallback");
+    });
+
+    test("writeIc preserves and passes messageAllocations to writeContract for cancel (refund to funder)", async () => {
+      let capturedFees: any = null;
+      const expectedAllocations = [
+        {
+          messageType: 0,
+          recipient: funder,
+          callKey: "0x0000000000000000000000000000000000000000000000000000000000000000",
+          budget: 150000000000000n,
+          feeParams: "0x01",
+        },
+      ];
+
+      const mockClient = {
+        account: funder,
+        estimateTransactionFeesForWrite: async () => ({
+          distribution: {
+            leaderTimeunitsAllocation: 200n,
+            validatorTimeunitsAllocation: 400n,
+            totalMessageFees: 150000000000000n,
+            rotations: [0n],
+          },
+          feeValue: 300000000000000n,
+          messageAllocations: expectedAllocations,
+        }),
+        writeContract: async (params: any) => {
+          capturedFees = params.fees;
+          return "0xtx_cancel_success";
+        },
+        getTransaction: async () => ({
+          status: "FINALIZED",
+          statusName: "FINALIZED",
+          txExecutionResultName: "FINISHED_WITH_RETURN",
+        }),
+      };
+
+      await writeIc({
+        account: funder,
+        provider: mockProvider,
+        functionName: "cancel",
+        args: [escrowId],
+        client: mockClient,
+      });
+
+      assert.ok(capturedFees, "Fees must be passed to writeContract");
+      assert.ok(capturedFees.messageAllocations, "messageAllocations must be passed in fees");
+      assert.equal(capturedFees.messageAllocations.length, 1);
+      assert.equal(capturedFees.messageAllocations[0].recipient, funder);
+      assert.equal(capturedFees.messageAllocations[0].budget, 150000000000000n);
+      assert.equal(capturedFees.distribution.totalMessageFees, 150000000000000n);
+    });
+
+    test("writeIc preserves and passes messageAllocations to writeContract for recipient payout (release)", async () => {
+      let capturedFees: any = null;
+      const expectedAllocations = [
+        {
+          messageType: 0,
+          recipient: recipient,
+          callKey: "0x0000000000000000000000000000000000000000000000000000000000000000",
+          budget: 150000000000000n,
+          feeParams: "0x01",
+        },
+      ];
+
+      const mockClient = {
+        account: funder,
+        estimateTransactionFeesForWrite: async () => ({
+          distribution: {
+            leaderTimeunitsAllocation: 200n,
+            validatorTimeunitsAllocation: 400n,
+            totalMessageFees: 150000000000000n,
+            rotations: [0n],
+          },
+          feeValue: 300000000000000n,
+          messageAllocations: expectedAllocations,
+        }),
+        writeContract: async (params: any) => {
+          capturedFees = params.fees;
+          return "0xtx_release_payout_success";
+        },
+        getTransaction: async () => ({
+          status: "FINALIZED",
+          statusName: "FINALIZED",
+          txExecutionResultName: "FINISHED_WITH_RETURN",
+        }),
+      };
+
+      await writeIc({
+        account: funder,
+        provider: mockProvider,
+        functionName: "release",
+        args: [escrowId],
+        client: mockClient,
+      });
+
+      assert.ok(capturedFees);
+      assert.ok(capturedFees.messageAllocations);
+      assert.equal(capturedFees.messageAllocations[0].recipient, recipient);
+      assert.equal(capturedFees.messageAllocations[0].budget, 150000000000000n);
+    });
+
+    test("writeIc preserves and passes messageAllocations to writeContract for final refund (release post-window)", async () => {
+      let capturedFees: any = null;
+      const expectedAllocations = [
+        {
+          messageType: 0,
+          recipient: funder,
+          callKey: "0x0000000000000000000000000000000000000000000000000000000000000000",
+          budget: 150000000000000n,
+          feeParams: "0x01",
+        },
+      ];
+
+      const mockClient = {
+        account: "0x3333333333333333333333333333333333333333",
+        estimateTransactionFeesForWrite: async () => ({
+          distribution: {
+            leaderTimeunitsAllocation: 200n,
+            validatorTimeunitsAllocation: 400n,
+            totalMessageFees: 150000000000000n,
+            rotations: [0n],
+          },
+          feeValue: 300000000000000n,
+          messageAllocations: expectedAllocations,
+        }),
+        writeContract: async (params: any) => {
+          capturedFees = params.fees;
+          return "0xtx_final_refund_success";
+        },
+        getTransaction: async () => ({
+          status: "FINALIZED",
+          statusName: "FINALIZED",
+          txExecutionResultName: "FINISHED_WITH_RETURN",
+        }),
+      };
+
+      await writeIc({
+        account: "0x3333333333333333333333333333333333333333",
+        provider: mockProvider,
+        functionName: "release",
+        args: [escrowId],
+        client: mockClient,
+      });
+
+      assert.ok(capturedFees);
+      assert.ok(capturedFees.messageAllocations);
+      assert.equal(capturedFees.messageAllocations[0].recipient, funder);
+    });
+
+    test("writeIc preserves and passes messageAllocations to writeContract for expire (refund to funder)", async () => {
+      let capturedFees: any = null;
+      const expectedAllocations = [
+        {
+          messageType: 0,
+          recipient: funder,
+          callKey: "0x0000000000000000000000000000000000000000000000000000000000000000",
+          budget: 150000000000000n,
+          feeParams: "0x01",
+        },
+      ];
+
+      const mockClient = {
+        account: funder,
+        estimateTransactionFeesForWrite: async () => ({
+          distribution: {
+            leaderTimeunitsAllocation: 200n,
+            validatorTimeunitsAllocation: 400n,
+            totalMessageFees: 150000000000000n,
+            rotations: [0n],
+          },
+          feeValue: 300000000000000n,
+          messageAllocations: expectedAllocations,
+        }),
+        writeContract: async (params: any) => {
+          capturedFees = params.fees;
+          return "0xtx_expire_success";
+        },
+        getTransaction: async () => ({
+          status: "FINALIZED",
+          statusName: "FINALIZED",
+          txExecutionResultName: "FINISHED_WITH_RETURN",
+        }),
+      };
+
+      await writeIc({
+        account: funder,
+        provider: mockProvider,
+        functionName: "expire",
+        args: [escrowId],
+        client: mockClient,
+      });
+
+      assert.ok(capturedFees);
+      assert.ok(capturedFees.messageAllocations);
+      assert.equal(capturedFees.messageAllocations[0].recipient, funder);
+    });
+
+    test("writeIc preserves and passes messageAllocations to writeContract for withdraw (credit to caller)", async () => {
+      let capturedFees: any = null;
+      const caller = "0x4444444444444444444444444444444444444444";
+      const expectedAllocations = [
+        {
+          messageType: 0,
+          recipient: caller,
+          callKey: "0x0000000000000000000000000000000000000000000000000000000000000000",
+          budget: 150000000000000n,
+          feeParams: "0x01",
+        },
+      ];
+
+      const mockClient = {
+        account: caller,
+        estimateTransactionFeesForWrite: async () => ({
+          distribution: {
+            leaderTimeunitsAllocation: 200n,
+            validatorTimeunitsAllocation: 400n,
+            totalMessageFees: 150000000000000n,
+            rotations: [0n],
+          },
+          feeValue: 300000000000000n,
+          messageAllocations: expectedAllocations,
+        }),
+        writeContract: async (params: any) => {
+          capturedFees = params.fees;
+          return "0xtx_withdraw_success";
+        },
+        getTransaction: async () => ({
+          status: "FINALIZED",
+          statusName: "FINALIZED",
+          txExecutionResultName: "FINISHED_WITH_RETURN",
+        }),
+      };
+
+      await writeIc({
+        account: caller,
+        provider: mockProvider,
+        functionName: "withdraw",
+        args: [],
+        client: mockClient,
+      });
+
+      assert.ok(capturedFees);
+      assert.ok(capturedFees.messageAllocations);
+      assert.equal(capturedFees.messageAllocations[0].recipient, caller);
+    });
+
+    test("evidence runners: cancel submitFn receives and passes messageAllocations to writeContract", async () => {
+      let capturedParams: any = null;
+      const expectedAllocations = [
+        {
+          messageType: 0,
+          recipient: funder,
+          callKey: "0x0000000000000000000000000000000000000000000000000000000000000000",
+          budget: 150000000000000n,
+          feeParams: "0x01",
+        },
+      ];
+
+      const mockRunnerClient = {
+        estimateTransactionFeesForWrite: async () => ({
+          distribution: {
+            leaderTimeunitsAllocation: 200n,
+            validatorTimeunitsAllocation: 400n,
+            totalMessageFees: 150000000000000n,
+            rotations: [0n],
+          },
+          feeValue: 300000000000000n,
+          messageAllocations: expectedAllocations,
+        }),
+        writeContract: async (params: any) => {
+          capturedParams = params;
+          return "0xtx_runner_cancel";
+        },
+      };
+
+      // Emulate runner submitFn pattern
+      const feeEst = await mockRunnerClient.estimateTransactionFeesForWrite({
+        address: CONTRACT_ADDRESS,
+        functionName: "cancel",
+        args: [escrowId],
+        leaderTimeunitsAllocation: 200n,
+        validatorTimeunitsAllocation: 400n,
+        rotations: [0n],
+      });
+      assert.ok(feeEst.messageAllocations?.length > 0, "Runner estimate must have allocations");
+
+      const txHash = await mockRunnerClient.writeContract({
+        address: CONTRACT_ADDRESS,
+        functionName: "cancel",
+        args: [escrowId],
+        fees: {
+          distribution: feeEst.distribution,
+          messageAllocations: feeEst.messageAllocations,
+          feeValue: feeEst.feeValue,
+        },
+      });
+
+      assert.equal(txHash, "0xtx_runner_cancel");
+      assert.ok(capturedParams.fees.messageAllocations);
+      assert.equal(capturedParams.fees.messageAllocations[0].recipient, funder);
+      assert.equal(capturedParams.fees.distribution.totalMessageFees, 150000000000000n);
+    });
+
+    test("evidence runners: release candidate payout submitFn receives and passes messageAllocations", async () => {
+      let capturedParams: any = null;
+      const expectedAllocations = [
+        {
+          messageType: 0,
+          recipient: recipient,
+          callKey: "0x0000000000000000000000000000000000000000000000000000000000000000",
+          budget: 150000000000000n,
+          feeParams: "0x01",
+        },
+      ];
+
+      const mockRunnerClient = {
+        estimateTransactionFeesForWrite: async () => ({
+          distribution: {
+            leaderTimeunitsAllocation: 200n,
+            validatorTimeunitsAllocation: 400n,
+            totalMessageFees: 150000000000000n,
+            rotations: [0n],
+          },
+          feeValue: 300000000000000n,
+          messageAllocations: expectedAllocations,
+        }),
+        writeContract: async (params: any) => {
+          capturedParams = params;
+          return "0xtx_runner_release_cand";
+        },
+      };
+
+      const feeEst = await mockRunnerClient.estimateTransactionFeesForWrite({
+        address: CONTRACT_ADDRESS,
+        functionName: "release",
+        args: [escrowId],
+        leaderTimeunitsAllocation: 200n,
+        validatorTimeunitsAllocation: 400n,
+        rotations: [0n],
+      });
+      assert.ok(feeEst.messageAllocations?.length > 0);
+
+      const txHash = await mockRunnerClient.writeContract({
+        address: CONTRACT_ADDRESS,
+        functionName: "release",
+        args: [escrowId],
+        fees: {
+          distribution: feeEst.distribution,
+          messageAllocations: feeEst.messageAllocations,
+          feeValue: feeEst.feeValue,
+        },
+      });
+
+      assert.equal(txHash, "0xtx_runner_release_cand");
+      assert.ok(capturedParams.fees.messageAllocations);
+      assert.equal(capturedParams.fees.messageAllocations[0].recipient, recipient);
+    });
+
+    test("evidence runners: post-window refund submitFn receives and passes messageAllocations", async () => {
+      let capturedParams: any = null;
+      const expectedAllocations = [
+        {
+          messageType: 0,
+          recipient: funder,
+          callKey: "0x0000000000000000000000000000000000000000000000000000000000000000",
+          budget: 150000000000000n,
+          feeParams: "0x01",
+        },
+      ];
+
+      const mockRunnerClient = {
+        estimateTransactionFeesForWrite: async () => ({
+          distribution: {
+            leaderTimeunitsAllocation: 200n,
+            validatorTimeunitsAllocation: 400n,
+            totalMessageFees: 150000000000000n,
+            rotations: [0n],
+          },
+          feeValue: 300000000000000n,
+          messageAllocations: expectedAllocations,
+        }),
+        writeContract: async (params: any) => {
+          capturedParams = params;
+          return "0xtx_runner_post_refund";
+        },
+      };
+
+      const feeEst = await mockRunnerClient.estimateTransactionFeesForWrite({
+        address: CONTRACT_ADDRESS,
+        functionName: "release",
+        args: [escrowId],
+        leaderTimeunitsAllocation: 200n,
+        validatorTimeunitsAllocation: 400n,
+        rotations: [0n],
+      });
+      assert.ok(feeEst.messageAllocations?.length > 0);
+
+      const txHash = await mockRunnerClient.writeContract({
+        address: CONTRACT_ADDRESS,
+        functionName: "release",
+        args: [escrowId],
+        fees: {
+          distribution: feeEst.distribution,
+          messageAllocations: feeEst.messageAllocations,
+          feeValue: feeEst.feeValue,
+        },
+      });
+
+      assert.equal(txHash, "0xtx_runner_post_refund");
+      assert.ok(capturedParams.fees.messageAllocations);
+      assert.equal(capturedParams.fees.messageAllocations[0].recipient, funder);
     });
   });
 });

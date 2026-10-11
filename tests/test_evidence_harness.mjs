@@ -1251,4 +1251,224 @@ describe("ShipLock Steward Evidence Harness Tests", () => {
       }
     });
   });
+
+  describe("7. Mode 1 Message Allocations in Evidence Runners", () => {
+    const CONTRACT_ADDRESS = "0x7Cef756668Cd925807e8B110D0330643c6F809E3";
+    const funder = "0x1111111111111111111111111111111111111111";
+    const recipient = "0x2222222222222222222222222222222222222222";
+    const escrowId = "0x7f24e638ea5ed353c377f968352fdf9d2e1c66959fa739fa69d1d32e54d58d53";
+
+    it("evidence runner cancel submitFn preserves and passes messageAllocations to writeContract", async () => {
+      let capturedFees = null;
+      const mockClient = {
+        estimateTransactionFeesForWrite: async ({ leaderTimeunitsAllocation, validatorTimeunitsAllocation }) => {
+          assert.ok(leaderTimeunitsAllocation >= 30n && leaderTimeunitsAllocation <= 600n);
+          assert.ok(validatorTimeunitsAllocation >= 30n && validatorTimeunitsAllocation <= 600n);
+          return {
+            distribution: {
+              leaderTimeunitsAllocation,
+              validatorTimeunitsAllocation,
+              totalMessageFees: 150000000000000n,
+              rotations: [0n],
+            },
+            messageAllocations: [
+              {
+                messageType: 0,
+                recipient: funder,
+                callKey: "0x0000000000000000000000000000000000000000000000000000000000000000",
+                budget: 150000000000000n,
+                feeParams: "0x01",
+              },
+            ],
+            feeValue: 300000000000000n,
+          };
+        },
+        writeContract: async (params) => {
+          capturedFees = params.fees;
+          return "0xtx_cancel_hash";
+        },
+      };
+
+      const feeEst = await mockClient.estimateTransactionFeesForWrite({
+        address: CONTRACT_ADDRESS,
+        functionName: "cancel",
+        args: [escrowId],
+        leaderTimeunitsAllocation: 200n,
+        validatorTimeunitsAllocation: 400n,
+        rotations: [0n],
+      });
+      assert.ok(feeEst.messageAllocations?.length > 0);
+
+      const txHash = await mockClient.writeContract({
+        address: CONTRACT_ADDRESS,
+        functionName: "cancel",
+        args: [escrowId],
+        fees: {
+          distribution: feeEst.distribution,
+          messageAllocations: feeEst.messageAllocations,
+          feeValue: feeEst.feeValue,
+        },
+      });
+
+      assert.equal(txHash, "0xtx_cancel_hash");
+      assert.ok(capturedFees.messageAllocations);
+      assert.equal(capturedFees.messageAllocations[0].recipient, funder);
+      assert.equal(capturedFees.distribution.totalMessageFees, 150000000000000n);
+    });
+
+    it("evidence runner candidate release payout submitFn preserves and passes messageAllocations", async () => {
+      let capturedFees = null;
+      const mockClient = {
+        estimateTransactionFeesForWrite: async () => ({
+          distribution: {
+            leaderTimeunitsAllocation: 200n,
+            validatorTimeunitsAllocation: 400n,
+            totalMessageFees: 150000000000000n,
+            rotations: [0n],
+          },
+          messageAllocations: [
+            {
+              messageType: 0,
+              recipient: recipient,
+              callKey: "0x0000000000000000000000000000000000000000000000000000000000000000",
+              budget: 150000000000000n,
+              feeParams: "0x01",
+            },
+          ],
+          feeValue: 300000000000000n,
+        }),
+        writeContract: async (params) => {
+          capturedFees = params.fees;
+          return "0xtx_cand_release_hash";
+        },
+      };
+
+      const feeEst = await mockClient.estimateTransactionFeesForWrite({
+        address: CONTRACT_ADDRESS,
+        functionName: "release",
+        args: [escrowId],
+        leaderTimeunitsAllocation: 200n,
+        validatorTimeunitsAllocation: 400n,
+        rotations: [0n],
+      });
+      assert.ok(feeEst.messageAllocations?.length > 0);
+
+      const txHash = await mockClient.writeContract({
+        address: CONTRACT_ADDRESS,
+        functionName: "release",
+        args: [escrowId],
+        fees: {
+          distribution: feeEst.distribution,
+          messageAllocations: feeEst.messageAllocations,
+          feeValue: feeEst.feeValue,
+        },
+      });
+
+      assert.equal(txHash, "0xtx_cand_release_hash");
+      assert.ok(capturedFees.messageAllocations);
+      assert.equal(capturedFees.messageAllocations[0].recipient, recipient);
+    });
+
+    it("evidence runner post-window refund submitFn preserves and passes messageAllocations", async () => {
+      let capturedFees = null;
+      const mockClient = {
+        estimateTransactionFeesForWrite: async () => ({
+          distribution: {
+            leaderTimeunitsAllocation: 200n,
+            validatorTimeunitsAllocation: 400n,
+            totalMessageFees: 150000000000000n,
+            rotations: [0n],
+          },
+          messageAllocations: [
+            {
+              messageType: 0,
+              recipient: funder,
+              callKey: "0x0000000000000000000000000000000000000000000000000000000000000000",
+              budget: 150000000000000n,
+              feeParams: "0x01",
+            },
+          ],
+          feeValue: 300000000000000n,
+        }),
+        writeContract: async (params) => {
+          capturedFees = params.fees;
+          return "0xtx_post_refund_hash";
+        },
+      };
+
+      const feeEst = await mockClient.estimateTransactionFeesForWrite({
+        address: CONTRACT_ADDRESS,
+        functionName: "release",
+        args: [escrowId],
+        leaderTimeunitsAllocation: 200n,
+        validatorTimeunitsAllocation: 400n,
+        rotations: [0n],
+      });
+      assert.ok(feeEst.messageAllocations?.length > 0);
+
+      const txHash = await mockClient.writeContract({
+        address: CONTRACT_ADDRESS,
+        functionName: "release",
+        args: [escrowId],
+        fees: {
+          distribution: feeEst.distribution,
+          messageAllocations: feeEst.messageAllocations,
+          feeValue: feeEst.feeValue,
+        },
+      });
+
+      assert.equal(txHash, "0xtx_post_refund_hash");
+      assert.ok(capturedFees.messageAllocations);
+      assert.equal(capturedFees.messageAllocations[0].recipient, funder);
+    });
+
+    it("evidence runner stops without submitting if estimation cannot produce messageAllocations for transfer", async () => {
+      let writeContractCalled = false;
+      const mockClient = {
+        estimateTransactionFeesForWrite: async () => ({
+          distribution: {
+            leaderTimeunitsAllocation: 200n,
+            validatorTimeunitsAllocation: 400n,
+            totalMessageFees: 0n,
+            rotations: [0n],
+          },
+          messageAllocations: [], // Missing allocations for a transfer!
+          feeValue: 1000n,
+        }),
+        writeContract: async () => {
+          writeContractCalled = true;
+          return "0xtx";
+        },
+      };
+
+      await assert.rejects(
+        async () => {
+          const feeEst = await mockClient.estimateTransactionFeesForWrite({
+            address: CONTRACT_ADDRESS,
+            functionName: "cancel",
+            args: [escrowId],
+            leaderTimeunitsAllocation: 200n,
+            validatorTimeunitsAllocation: 400n,
+            rotations: [0n],
+          });
+          if (!feeEst.messageAllocations || feeEst.messageAllocations.length === 0) {
+            throw new Error("Failed to estimate message allocations for cancel transfer");
+          }
+          await mockClient.writeContract({
+            address: CONTRACT_ADDRESS,
+            functionName: "cancel",
+            args: [escrowId],
+            fees: {
+              distribution: feeEst.distribution,
+              messageAllocations: feeEst.messageAllocations,
+              feeValue: feeEst.feeValue,
+            },
+          });
+        },
+        /Failed to estimate message allocations for cancel transfer/
+      );
+
+      assert.equal(writeContractCalled, false, "Must not call writeContract when allocations are missing");
+    });
+  });
 });
