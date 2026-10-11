@@ -1,0 +1,17 @@
+{
+  "name": "shiplock-steward-release-live",
+  "version": "1.0.0",
+  "description": "ShipLock steward verification live release candidate for GenLayer Studio Next",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "test": "node index.js"
+  },
+  "keywords": [
+    "shiplock",
+    "genlayer",
+    "steward"
+  ],
+  "author": "ShipLock Steward",
+  "license": "MIT"
+}

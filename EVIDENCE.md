@@ -1,217 +1,173 @@
 # ShipLock Steward Evidence & Repository Audit Report
 
 **Network**: GenLayer Studio Next (`studio-dev`) | **Chain ID**: `61997` (`0xF22D`)  
-**Active Contract**: `0x7Cef756668Cd925807e8B110D0330643c6F809E3`  
-**Production Web App**: https://shiplock-chi.vercel.app/  
-**Explorer Address**: https://explorer-studio-dev.genlayer.com/address/0x7Cef756668Cd925807e8B110D0330643c6F809E3  
-**Report Generated**: October 11, 2026  
+**Active Contract Address**: `0x7Cef756668Cd925807e8B110D0330643c6F809E3`  
+**Canonical RPC**: `https://studio-dev.genlayer.com/api`  
+**Production Web URL**: https://shiplock-chi.vercel.app/  
+**Contract Explorer**: https://explorer-studio-dev.genlayer.com/address/0x7Cef756668Cd925807e8B110D0330643c6F809E3  
+**Audit & Verification Date**: October 11, 2026  
 
 ---
 
-## 1. Executive Summary & On-Chain Parity
+## 1. Verified Active Configuration & On-Chain State
 
-ShipLock is an immutable, time-gated package registry publication escrow deployed to GenLayer Studio Next. Escrow conditions are settled using GenLayer's consensus and decentralized oracle execution against official public package registry endpoints (`pypi.org` and `registry.npmjs.org`).
+ShipLock is an immutable, time-gated package publication escrow deployed to GenLayer Studio Next. Release decisions are resolved using GenLayer decentralized validator consensus querying public registry HTTP endpoints (`pypi.org` and `registry.npmjs.org`).
 
-### Verified Active Configuration
-| Parameter | Value | Verification |
+### Active Deployment Parity
+| Parameter | Value | Verification Status |
 |---|---|---|
-| **Active Contract Address** | `0x7Cef756668Cd925807e8B110D0330643c6F809E3` | Confirmed active on Studio Next |
+| **Contract Address** | `0x7Cef756668Cd925807e8B110D0330643c6F809E3` | Confirmed active on Studio Next |
 | **Deployment Transaction** | [`0x3f7e83337967b194e40fea35a4f8abea7f99a05890a422d2d89096052e2a5854`](https://explorer-studio-dev.genlayer.com/tx/0x3f7e83337967b194e40fea35a4f8abea7f99a05890a422d2d89096052e2a5854) | Status: `FINALIZED`, Execution: `FINISHED_WITH_RETURN` |
-| **Deployer Wallet** | `0x20E850BAaD26d763d4f691780D1BEBA01c8D6084` | Funded via Studio Next faucet |
-| **Source SHA-256 Hash** | `be743c1a8277716d21018911352fe9d7ccd3dd30fb1b8d829d19384133401a0e` | 100% parity with local `contracts/shiplock.py` |
-| **Production Web URL** | https://shiplock-chi.vercel.app/ | Badge displays `0x7Cef...09E3` |
-| **RPC Endpoint** | `https://studio-dev.genlayer.com/api` | Canonical Studio Next RPC |
+| **Deployer Wallet** | `0x20E850BAaD26d763d4f691780D1BEBA01c8D6084` | Live Studio Next account |
+| **Recipient Wallet** | `0x0f907a2598AEF71B988f9208103066586A1a4aF0` | Configured test recipient |
+| **Source SHA-256 Hash** | `be743c1a8277716d21018911352fe9d7ccd3dd30fb1b8d829d19384133401a0e` | 100% on-chain byte parity with `contracts/shiplock.py` |
 
 ### Live On-Chain Economics (`get_economics()`)
 Snapshot read directly from contract `0x7Cef756668Cd925807e8B110D0330643c6F809E3`:
-- **Escrowed Open**: `0.06 GEN` (`60000000000000000 wei`)
+- **`escrowed_open`**: `0.06 GEN` (`60000000000000000 wei`)
   - PyPI 404 Smoke Escrow: `0.02 GEN`
   - npm 404 Smoke Escrow: `0.02 GEN`
   - PyPI Release Candidate Escrow: `0.01 GEN`
   - npm Release Candidate Escrow: `0.01 GEN`
-- **Outstanding Credits**: `0 GEN`
-- **Paid to Recipients**: `0 GEN`
-- **Refunded to Funders**: `0.01 GEN` (`10000000000000000 wei` from canceled test escrow)
-- **Treasury**: `0 GEN`
+- **`refunded_to_funders`**: `0.01 GEN` (`10000000000000000 wei` from canceled escrow `0xd450d74c...`)
+- **`paid_to_recipients`**: `0.00 GEN`
+- **`outstanding_credits`**: `0.00 GEN`
+- **`treasury`**: `0.00 GEN`
 
 ---
 
-## 2. Completed Live Settlement Evidence
+## 2. Completed On-Chain Evidence Audit
 
-The following transactions have executed and finalized on GenLayer Studio Next.
+The following transactions and escrows have been audited against scripts and verified directly via live RPC query:
 
-### A. Contract Deployment
-- **Tx Hash**: [`0x3f7e83337967b194e40fea35a4f8abea7f99a05890a422d2d89096052e2a5854`](https://explorer-studio-dev.genlayer.com/tx/0x3f7e83337967b194e40fea35a4f8abea7f99a05890a422d2d89096052e2a5854)
-- **Status**: `FINALIZED`
-- **Execution Result**: `FINISHED_WITH_RETURN`
-- **Contract Produced**: `0x7Cef756668Cd925807e8B110D0330643c6F809E3`
+| Escrow Role | Package & Version | On-Chain Escrow ID | Fund / Cancel Transaction | Final State & Economics |
+|---|---|---|---|---|
+| **Contract Deploy** | N/A | N/A | [`0x3f7e8333...`](https://explorer-studio-dev.genlayer.com/tx/0x3f7e83337967b194e40fea35a4f8abea7f99a05890a422d2d89096052e2a5854) | Deployed contract `0x7Cef...09E3` |
+| **PyPI 404 Smoke** | `shiplock-smoke-does-not-exist` @ `0.0.0-smoke.1` | `0x1ac2eea7c83967a0abe667355598d3809fb2552cc5d4227ad7ba86fee09a3c46` | Fund: [`0x6a307ceab940...`](https://explorer-studio-dev.genlayer.com/tx/0x6a307ceab940e184215b576e5826c8f361e2fabe3f9eea4f6769cb6533ac7312) | `OPEN` (0.02 GEN locked, `LOOKBACK_404_OK`) |
+| **npm 404 Smoke** | `shiplock-smoke-does-not-exist-npm` @ `0.0.0-smoke.1` | `0x6a335be143b6b8fc255392c764b2cca019ce81ea413dcf6ba88f312ada0bf40e` | Fund: [`0xd25c4478f9be...`](https://explorer-studio-dev.genlayer.com/tx/0xd25c4478f9bea148882fabc24620116aaa3d8281280e72115227b49aa2f9d617) | `OPEN` (0.02 GEN locked, `LOOKBACK_404_OK`) |
+| **Canceled Smoke** | `shiplock-smoke-cancel-target` @ `0.0.0-smoke.1` | `0xd450d74c9eee0d8ff4d92983bfc79ee55f01ef3609c4e6d0dd5fcb0c8867c2a3` | Fund: [`0x2ce8683d...`](https://explorer-studio-dev.genlayer.com/tx/0x2ce8683d5762d9b322b1a91ef0f1bc4f70cdbfabb4267a42a6e26f47951c640e)<br>Cancel: [`0xdb6d919c...`](https://explorer-studio-dev.genlayer.com/tx/0xdb6d919c7b4462d479917e8df1783a6a087053c80e24bf5bce2600f0fc56ab4e) | `CANCELED` (0.01 GEN native refunded to funder via `emit_transfer`) |
+| **PyPI Release Cand.** | `shiplock-steward-release-live` @ `1.0.0` | `0xdc2dfac88f9a7dbc2615c3a2338cd12819efca660352c1d1c8b6f530ed5f9c1a` | Fund: [`0x0f09d238...`](https://explorer-studio-dev.genlayer.com/tx/0x0f09d23831be1fb344b135c09cb674529e4caa5c607fe665988b5da80d342cc6) | `OPEN` (0.01 GEN locked, `LOOKBACK_404_OK`) |
+| **npm Release Cand.** | `shiplock-steward-release-live` @ `1.0.0` | `0x3c46e617d6541f63e69f783c0a481f429bb9c7e08509274ebbef25fc1b8444ad` | Fund: [`0xb627438c...`](https://explorer-studio-dev.genlayer.com/tx/0xb627438c2bb6190960b9eea4c4acb8f09847e14aa02e0b4b219056437bd30a01) | `OPEN` (0.01 GEN locked, `LOOKBACK_404_OK`) |
 
-### B. PyPI 404 Escrow Funding (Smoke)
-- **Target**: `shiplock-smoke-does-not-exist` @ `0.0.0-smoke.1` (`PYPI_VERSION`)
-- **Escrow ID**: `0x1ac2eea7c83967a0abe667355598d3809fb2552cc5d4227ad7ba86fee09a3c46`
-- **Tx Hash**: [`0x6a307ceab940e184215b576e5826c8f361e2fabe3f9eea4f6769cb6533ac7312`](https://explorer-studio-dev.genlayer.com/tx/0x6a307ceab940e184215b576e5826c8f361e2fabe3f9eea4f6769cb6533ac7312)
-- **Principal Locked**: `0.02 GEN`
-- **On-Chain State**: `status=OPEN`, `match_reason=LOOKBACK_404_OK`
-- **Window**: `2026-10-12T10:33:18Z` to `2026-10-14T10:33:18Z`
-
-### C. npm 404 Escrow Funding (Smoke)
-- **Target**: `shiplock-smoke-does-not-exist-npm` @ `0.0.0-smoke.1` (`NPM_VERSION`)
-- **Escrow ID**: `0x6a335be143b6b8fc255392c764b2cca019ce81ea413dcf6ba88f312ada0bf40e`
-- **Tx Hash**: [`0xd25c4478f9bea148882fabc24620116aaa3d8281280e72115227b49aa2f9d617`](https://explorer-studio-dev.genlayer.com/tx/0xd25c4478f9bea148882fabc24620116aaa3d8281280e72115227b49aa2f9d617)
-- **Principal Locked**: `0.02 GEN`
-- **On-Chain State**: `status=OPEN`, `match_reason=LOOKBACK_404_OK`
-- **Window**: `2026-10-12T10:33:18Z` to `2026-10-14T10:33:18Z`
-
-### D. Funder Cancellation & Instant Native Refund
-- **Target**: `shiplock-smoke-cancel-target` @ `0.0.0-smoke.1` (`PYPI_VERSION`)
-- **Escrow ID**: `0xd450d74c0552b57579163e7ae988352b22f4722ceec43d0fca7a7e8da92ee6ff`
-- **Cancel Tx Hash**: [`0xdb6d919c7b4462d479917e8df1783a6a087053c80e24bf5bce2600f0fc56ab4e`](https://explorer-studio-dev.genlayer.com/tx/0xdb6d919c7b4462d479917e8df1783a6a087053c80e24bf5bce2600f0fc56ab4e)
-- **Status**: `FINALIZED`, `FINISHED_WITH_RETURN`
-- **Post-State**: `status=CANCELED`
-- **Refund Routing**: `0.01 GEN` immediately returned to funder wallet (`0x20E850BAaD26d763d4f691780D1BEBA01c8D6084`) via `emit_transfer` in the same consensus block.
+*Correction Note*: The canceled escrow ID was verified on-chain as `0xd450d74c9eee0d8ff4d92983bfc79ee55f01ef3609c4e6d0dd5fcb0c8867c2a3` (correcting a prior documentation typo).
 
 ---
 
-## 3. Pending Time-Gated 404 Settlement Evidence
+## 3. Fail-Closed Evidence Harness Architecture
 
-The contract strictly enforces that pre-window release calls revert (`contracts/shiplock.py:530-532`):
-```python
-if now_dt < start_dt:
-    raise gl.vm.UserError("Execution window not open yet")
-```
+To guarantee that rerun, timeout, or interruption never results in double-submission, state corruption, or false verification claims, both runners (`settle_404_escrows.mjs` and `release_candidate_escrows.mjs`) implement strict safety invariants via [`scripts/evidence_helper.mjs`](file:///d:/shiplock/scripts/evidence_helper.mjs):
 
-### Time Gates Schedule
-```
-Current Time:      2026-10-11 10:15:00 UTC
-Window Start Gate: 2026-10-12 10:33:18 UTC  (In-Window Release Check)
-Window End Gate:   2026-10-14 10:33:18 UTC  (Final No-Hit Settlement)
-```
-
-### Exact Settle Sequence
-1. **At or after `2026-10-12 10:33:18 UTC` (In-Window Check)**:
-   - Script: `node scripts/settle_404_escrows.mjs`
-   - Caller: Non-funder account (`coverlock-submitter`).
-   - Expected Result: Contract queries PyPI and npm. Both packages return 404 (package still not released). Because `now < window_end`, the escrow remains `OPEN` and the `0.02 GEN` principal remains fully locked.
-2. **At or after `2026-10-14 10:33:18 UTC` (Post-Window Settlement)**:
-   - Script: `node scripts/settle_404_escrows.mjs`
-   - Caller: Non-funder account (`coverlock-submitter`).
-   - Expected Result: Contract queries PyPI and npm. Both packages return 404. Because `now >= window_end`, the escrow transitions to `REFUND_NOHIT`. The full `0.02 GEN` principal routes back to funder credit or address. Economics updates: `refunded_to_funders += 0.04 GEN`.
-
-The harness script `scripts/settle_404_escrows.mjs` is idempotent, reads live state before submitting, and will not double-submit or fail upon rerun.
+1. **Immediate Hash Persistence**:
+   - The returned transaction hash is written to disk *immediately* before waiting for receipt confirmation.
+2. **Pending Transaction Reconciliation (Crash Resilience)**:
+   - Upon rerun, the script looks up any recorded pending transaction hash on-chain via `getTransaction`.
+   - If the recorded transaction is already `FINALIZED` + `FINISHED_WITH_RETURN`, it reconciles the result from that transaction rather than sending another write.
+   - If the transaction reverted or failed, the runner immediately halts with an error. It **never** silently resubmits.
+3. **Fail-Closed Execution Assertion**:
+   - Requires both `statusName === "FINALIZED"` AND `txExecutionResultName === "FINISHED_WITH_RETURN"`. Reverted or error executions abort immediately.
+4. **On-Chain Post-State Verification**:
+   - A transaction is never marked verified based on transaction receipt or escrow status alone.
+   - The runner reads back `get_escrow(id)` and verifies:
+     - Expected `status` (`OPEN`, `RELEASED`, or `REFUND_NOHIT`).
+     - Expected `match_reason` (`LOOKBACK_404_OK`, `EARLY_404_RETRYABLE`, `200_IN_WINDOW`, `WINDOW_EXPIRED_NO_RELEASE`).
+     - Principal integrity (`amount` unchanged).
+     - Accurate `payout` and `refund` values.
+5. **On-Chain Economics Delta Enforcement**:
+   - Compares before and after economics snapshots via `get_economics()`:
+     - **For Release**: `paid_to_recipients` must increase by `amount`, and `escrowed_open` must decrease by `amount`.
+     - **For Refund**: `refunded_to_funders` must increase by `amount`, and `escrowed_open` must decrease by `amount`.
+     - **For In-Window 404 Check**: `escrowed_open`, `paid_to_recipients`, and `refunded_to_funders` must remain unchanged.
+6. **Atomic Evidence Persistence**:
+   - Uses `atomicWriteJson`: writes to a unique temporary file (`.tmp.<timestamp>.<rand>`) and calls `renameSync` to eliminate file truncation risks if interrupted.
 
 ---
 
-## 4. Live Release Candidate Escrows & Registry Publication Protocol
+## 4. Time-Gated 404 Settlement Schedule & Execution
 
-To provide live successful-release evidence without relying on mocks, two real candidate test escrows have been funded and are active on Studio Next.
+The PyPI and npm 404 smoke escrows are protected by on-chain timelocks:
+- `window_start_utc`: `2026-10-12 10:33:18 UTC`
+- `window_end_utc`: `2026-10-14 10:33:18 UTC`
+- `expire_at_utc`: `2026-10-21 10:33:18 UTC`
 
-### A. Funded Release Candidate Escrows
-| Registry | Package | Version | Escrow ID | Fund Tx | Window |
-|---|---|---|---|---|---|
-| **PyPI** | `shiplock-steward-release-live` | `1.0.0` | `0xdc2dfac88f9a7dbc2615c3a2338cd12819efca660352c1d1c8b6f530ed5f9c1a` | [`0x0f09d238...`](https://explorer-studio-dev.genlayer.com/tx/0x0f09d23831be1fb344b135c09cb674529e4caa5c607fe665988b5da80d342cc6) | `2026-10-12 12:11:12 UTC` – `2026-10-14 12:11:12 UTC` |
-| **npm** | `shiplock-steward-release-live` | `1.0.0` | `0x3c46e617d6541f63e69f783c0a481f429bb9c7e08509274ebbef25fc1b8444ad` | [`0xb627438c...`](https://explorer-studio-dev.genlayer.com/tx/0xb627438c2bb6190960b9eea4c4acb8f09847e14aa02e0b4b219056437bd30a01) | `2026-10-12 12:11:12 UTC` – `2026-10-14 12:11:12 UTC` |
+Pre-window release calls are strictly rejected by the contract (`contracts/shiplock.py:548`). Neither branch has been executed early.
 
-- **Principal**: `0.01 GEN` each (`10000000000000000 wei`)
-- **Recipient Address**: `0x0f907a2598AEF71B988f9208103066586A1a4aF0`
-- **Funder Address**: `0x20E850BAaD26d763d4f691780D1BEBA01c8D6084`
-- **Initial Verification**: Both contracts passed on-chain `LOOKBACK_404_OK` consensus validation.
+### Execution Plan
+1. **In-Window Retryable Check**:
+   - **Permitted Time**: Between `2026-10-12 10:33:18 UTC` and `2026-10-14 10:33:18 UTC`.
+   - **Command**: `node scripts/settle_404_escrows.mjs`
+   - **Expected Outcome**: Contract fetches registry $\rightarrow$ 404 miss $\rightarrow$ escrow remains `OPEN` with `0.02 GEN` principal intact $\rightarrow$ economics unchanged.
+2. **Post-Window Final No-Hit Settle**:
+   - **Permitted Time**: At or after `2026-10-14 10:33:18 UTC`.
+   - **Command**: `node scripts/settle_404_escrows.mjs`
+   - **Expected Outcome**: Contract fetches registry $\rightarrow$ 404 miss after window end $\rightarrow$ transitions to `REFUND_NOHIT` (`WINDOW_EXPIRED_NO_RELEASE`) $\rightarrow$ 100% of principal (`0.02 GEN` each) credited to funder $\rightarrow$ economics updates `refunded_to_funders += 0.04 GEN`.
 
-### B. Required Registry Publication Steps (Manual Steward Gate)
-Because GenLayer queries real public registries (`pypi.org` and `registry.npmjs.org`), publishing artifacts requires authorized credentials. No credentials or tokens may be stored in Git.
+---
 
-1. **PyPI Artifact Publication**:
-   - Time window: Between `2026-10-12 12:11:12 UTC` and `2026-10-14 12:11:12 UTC`.
-   - Command:
+## 5. Candidate Release Escrows & Registry Artifacts
+
+### Candidate Escrows Configuration
+- **PyPI Candidate**: `shiplock-steward-release-live` @ `1.0.0`
+  - Escrow ID: `0xdc2dfac88f9a7dbc2615c3a2338cd12819efca660352c1d1c8b6f530ed5f9c1a`
+  - Window: `2026-10-12 12:11:12 UTC` $\rightarrow$ `2026-10-14 12:11:12 UTC`
+  - Expire: `2026-10-21 12:11:12 UTC`
+- **npm Candidate**: `shiplock-steward-release-live` @ `1.0.0`
+  - Escrow ID: `0x3c46e617d6541f63e69f783c0a481f429bb9c7e08509274ebbef25fc1b8444ad`
+  - Window: `2026-10-12 12:11:12 UTC` $\rightarrow$ `2026-10-14 12:11:12 UTC`
+  - Expire: `2026-10-21 12:11:12 UTC`
+
+### Contract Timing Invariant
+Under `contracts/shiplock.py` (lines 548, 570), an artifact published **inside** `[window_start_utc, window_end_utc]` can be released to the recipient at **any time** before `expire_at_utc` (`now < expire_at`), even after `window_end` has passed.
+
+### Prepared Package Artifacts
+Clean, minimal package sources have been staged in the repository:
+- PyPI: [`packages/shiplock-steward-release-live/pypi/`](file:///d:/shiplock/packages/shiplock-steward-release-live/pypi/) (`pyproject.toml`, `README.md`, `__init__.py`)
+- npm: [`packages/shiplock-steward-release-live/npm/`](file:///d:/shiplock/packages/shiplock-steward-release-live/npm/) (`package.json`, `README.md`, `index.js`)
+
+Both package names were verified as available on public registries:
+- PyPI: `https://pypi.org/pypi/shiplock-steward-release-live/json` $\rightarrow$ HTTP `404 Not Found`
+- npm: `https://registry.npmjs.org/shiplock-steward-release-live` $\rightarrow$ HTTP `404 Not Found`
+
+### Private Registry Authentication Method
+Registry credentials must never be passed in command arguments, chat, logs, or committed to Git:
+1. **PyPI Publication**:
+   - Use environment variables in an interactive terminal:
      ```bash
-     # From a local package directory containing pyproject.toml for shiplock-steward-release-live version 1.0.0
+     export TWINE_USERNAME="__token__"
+     export TWINE_PASSWORD="<PYPI_API_TOKEN>"
+     cd packages/shiplock-steward-release-live/pypi
      python -m build
-     twine upload --username __token__ --password <YOUR_PRIVATE_PYPI_API_TOKEN> dist/*
+     twine upload dist/*
      ```
-2. **npm Artifact Publication**:
-   - Time window: Between `2026-10-12 12:11:12 UTC` and `2026-10-14 12:11:12 UTC`.
-   - Command:
+   - Must be executed inside the window: `2026-10-12 12:11:12 UTC` to `2026-10-14 12:11:12 UTC`.
+2. **npm Publication**:
+   - Use an environment variable or authenticated local `.npmrc`:
      ```bash
-     # From a local package directory containing package.json for shiplock-steward-release-live version 1.0.0
+     export NODE_AUTH_TOKEN="<NPM_AUTOMATION_TOKEN>"
+     cd packages/shiplock-steward-release-live/npm
      npm publish --access public
      ```
+   - Must be executed inside the window: `2026-10-12 12:11:12 UTC` to `2026-10-14 12:11:12 UTC`.
 3. **Trigger On-Chain Release**:
-   - Once published to the public registries, run:
-     ```bash
-     node scripts/release_candidate_escrows.mjs
-     ```
-   - This script invokes `release(cand.id)` from an authorized non-funder account (`coverlock-submitter`), verifies the consensus transition to `RELEASED`, confirms `0.01 GEN` recipient transfer to `0x0f907a25...`, and updates evidence logs.
+   - Run `node scripts/release_candidate_escrows.mjs`. Queries the endpoints over HTTP, confirms publication timestamp, submits `release(id)` from non-funder account, verifies `RELEASED` state, and validates the `0.01 GEN` payout.
 
 ---
 
-## 5. Repository Cleanup Manifest
+## 6. Secret Audit Scope & Precision
 
-A comprehensive audit was performed across all tracked files. 29 obsolete, backup, redundant, or sensitive scratch files were removed.
+- **Scope**: Scanned the *active tracked tree on `main`* using [`scripts/audit_secrets.py`](file:///d:/shiplock/scripts/audit_secrets.py).
+- **Findings**: **0 plaintext private keys, 0 passwords, 0 decrypted keystores, 0 `.env.local` files tracked**.
+- **Important Qualification**: Sensitive local development files (`.deployer_keystore.json`, `web/.env.local`) are excluded via `.gitignore`. This audit certifies the clean state of the active commit tree and does not rewrite or erase historical Git commits.
 
-| Removed File | Category | Reason for Removal |
+---
+
+## 7. Verification Test Matrix
+
+| Test Suite | Scope | Result |
 |---|---|---|
-| `convert_icons.py` | Obsolete Script | One-time asset converter; icons already converted and built into web assets. |
-| `gltest.config.yaml.bak` | Backup File | Stale backup of test configuration. |
-| `out1.txt` | Generated Log | Transient command output log. |
-| `out2.txt` | Generated Log | Transient command output log. |
-| `out3.txt` | Generated Log | Transient command output log. |
-| `out4.txt` | Generated Log | Transient command output log. |
-| `out_conftest.txt` | Generated Log | Transient command output log. |
-| `rewrite2.py` | Scratch Script | Superseded code rewrite scratch file. |
-| `rewrite_conftest.py` | Scratch Script | Superseded test rewrite scratch file. |
-| `scratch_fee_profile.json` | Scratch File | Temporary fee calculation scratch file; production fees live in `fee-profile.json`. |
-| `scripts/sync_keystore.mjs` | Superseded Script | Deprecated key sync helper superseded by `scripts/deployer_keystore.py`. |
-| `setup_tests.py` | Scratch Script | One-time setup helper replaced by standard `pytest` suite. |
-| `tests/fixtures/non_json.txt` | Duplicate Fixture | Exact duplicate of `tests/direct/fixtures/non_json.txt`. |
-| `tests/fixtures/npm_published.json` | Duplicate Fixture | Exact duplicate of `tests/direct/fixtures/npm_published.json`. |
-| `tests/fixtures/npm_scoped_published.json` | Duplicate Fixture | Exact duplicate of `tests/direct/fixtures/npm_scoped_published.json`. |
-| `tests/fixtures/oversize_note.txt` | Duplicate Fixture | Exact duplicate of `tests/direct/fixtures/oversize_note.txt`. |
-| `tests/fixtures/pypi_404.json` | Duplicate Fixture | Exact duplicate of `tests/direct/fixtures/pypi_404.json`. |
-| `tests/fixtures/pypi_published.json` | Duplicate Fixture | Exact duplicate of `tests/direct/fixtures/pypi_published.json`. |
-| `tests/fixtures/pypi_yanked.json` | Duplicate Fixture | Exact duplicate of `tests/direct/fixtures/pypi_yanked.json`. |
-| `tests/integration/test_profile.py` | Stale Test | Abandoned mock integration test; replaced by direct unit suite and live Studio Next smoke tests. |
-| `web/decrypt.mjs` | Superseded Script | Temporary keystore decryption probe. |
-| `web/deploy.mjs` | Superseded Script | Outdated deployment script replaced by `scripts/deploy_shiplock_live.mjs`. |
-| `web/deploy_pk.mjs` | Insecure Scratch | Contained hardcoded historical devnet test private key. |
-| `web/deploy_pk2.mjs` | Insecure Scratch | Contained hardcoded historical devnet test private key. |
-| `web/deploy_pk3.mjs` | Insecure Scratch | Contained hardcoded historical devnet test private key. |
-| `web/deploy_pk4.mjs` | Insecure Scratch | Contained hardcoded historical devnet test private key. |
-| `web/deploy_pk5.mjs` | Insecure Scratch | Contained hardcoded historical devnet test private key. |
-| `web/deploy_pk6.mjs` | Insecure Scratch | Contained hardcoded historical devnet test private key. |
-| `web/fix.js` | Scratch Script | Transient web fix scratch file. |
-| `web/test-estimate.mjs` | Scratch Script | Ad-hoc fee estimation script replaced by verified fee profiles. |
-
----
-
-## 6. Secret & Security Audit
-
-An automated scan of the active repository tree was executed using `scripts/audit_secrets.py`:
-- Scanned for: Private key regexes, `.env.local` files, decrypted keystores, raw hex seeds.
-- Results: **0 leaked keys, 0 passwords, 0 decrypted credentials found in active tracked tree**.
-- Keytar & encrypted keystores (`.deployer_keystore.json`) are strictly gitignored.
-
----
-
-## 7. Verification Test Suite Results
-
-### Direct Contract Tests
-```bash
-python -m pytest tests/direct -q
-```
-**Result**: **35 passed** in 3.61s.
-
-### Keystore Manager Tests
-```bash
-python -m pytest tests/test_deployer_keystore.py -v
-```
-**Result**: **13 passed** in 1.45s.
-
-### Frontend Quality Gates
-```bash
-npm --prefix web test
-npm --prefix web run lint
-npm --prefix web run build
-```
-**Result**:
-- Web unit tests passed (12/12)
-- ESLint passed (0 errors)
-- Next.js production build succeeded (`.next` standalone artifact generated)
+| `python -m pytest tests/direct -q` | Direct contract unit tests | **35 passed** |
+| `python -m pytest tests/test_deployer_keystore.py -v` | Keystore & address preservation | **13 passed** |
+| `node --test tests/test_evidence_harness.mjs` | Reverted tx, pending recovery, state checks, atomic write | **8 passed** |
+| `npm --prefix web test` | Frontend flow & contract runtime tests | **45 passed** |
+| `npm --prefix web run lint` | ESLint static analysis | **0 errors** |
+| `npm --prefix web run build` | Next.js production build | **Compiled successfully** |
+| `https://shiplock-chi.vercel.app/` | Live Vercel production deployment | **Verified live** |
