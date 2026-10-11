@@ -175,7 +175,7 @@ The palette is anchored in an uncompromising deep carbon environment, punctuated
 ### State Tokens (Escrow & Verification)
 - **OPEN / VERIFIED**: `#E2F952` on `rgba(226, 249, 82, 0.08)` border `rgba(226, 249, 82, 0.4)`
 - **RELEASED**: `#30D158` on `rgba(48, 209, 88, 0.08)` border `rgba(48, 209, 88, 0.3)`
-- **REFUND_NOHIT / INSUFFICIENT**: `#FF453A` on `rgba(255, 69, 58, 0.08)` border `rgba(255, 69, 58, 0.3)`
+- **REFUND_NOHIT**: `#FF453A` on `rgba(255, 69, 58, 0.08)` border `rgba(255, 69, 58, 0.3)`
 - **CANCELED / EXPIRED**: `#8E8E93` on `rgba(142, 142, 147, 0.08)` border `rgba(142, 142, 147, 0.24)`
 
 ## Typography
@@ -235,7 +235,6 @@ The geometric form language is strictly sharp (`roundedness: 0`).
   - `OPEN`: Text `#E2F952`, background `rgba(226, 249, 82, 0.08)`, border `1px solid #E2F952`.
   - `RELEASED`: Text `#30D158`, background `rgba(48, 209, 88, 0.08)`, border `1px solid rgba(48, 209, 88, 0.4)`.
   - `REFUND_NOHIT`: Text `#FF453A`, background `rgba(255, 69, 58, 0.08)`, border `1px solid rgba(255, 69, 58, 0.4)`.
-  - `INSUFFICIENT`: Text `#FF9F0A`, background `rgba(255, 159, 10, 0.08)`, border `1px solid rgba(255, 159, 10, 0.4)`.
   - `CANCELED` / `EXPIRED`: Text `#8E8E93`, background `rgba(142, 142, 147, 0.08)`, border `1px solid rgba(142, 142, 147, 0.25)`.
 
 ### Metric Chambers (Data Tiles)

@@ -1,7 +1,7 @@
 # ShipLock
 
 Time-gated registry-publication escrow on **GenLayer Studio Next**.
-A funder locks test GEN against one exact PyPI or npm version plus a UTC window. Anyone may later call `release`. Validators fetch the official registry JSON. The contract pays the recipient only if that version exists, is not yanked, and its publish time sits inside the window. Otherwise it refunds the funder.
+A funder locks test GEN against one exact PyPI or npm version plus a UTC window. Anyone may later call `release`. Validators fetch the official registry JSON. The contract pays the recipient only if that version exists, is not yanked, and its publish time sits inside the window. If the version is not yet published during the window, or if a registry error occurs, the escrow remains `OPEN` and retryable. Final `REFUND_NOHIT` to the funder requires qualifying evidence at or after `window_end` (or verified yanked/out-of-window publication).
 Same write. No docket. No appeal UI. No court.
 
 > This is a Studio Next testnet app. Bonds are test GEN with no real value.
@@ -33,23 +33,29 @@ Same write. No docket. No appeal UI. No court.
 
 ## What it is / is not
 ShipLock is **not** a court, not an appeal board, not a vuln escrow.
-Outcomes are only: `OPEN` · `RELEASED` · `REFUND_NOHIT` · `INSUFFICIENT` · `CANCELED` · `EXPIRED`
+Outcomes are only: `OPEN` · `RELEASED` · `REFUND_NOHIT` · `CANCELED` · `EXPIRED`
 IDs are `0x` + 64 hex SHA-256 strings. Never `1, 2, 3`.
 
 ## Loop
 1. `fund_escrow(template, package, version, recipient, start_utc, end_utc)` payable
-   Lookback on the official JSON. Already-published or already-yanked → reject. 404 / missing version → allow (future-ship).
+   Lookback on the official JSON. Already-published or already-yanked → reject. Verified 404 / missing version → allow (future-ship). Inconclusive / incomplete evidence → reject.
    Window start must be ≥ now + 24h. Duration 1–14 days. `recipient != funder`. `latest` and URLs rejected.
-2. Before `window_start`, **only the funder** may `cancel` → native refund.
-3. Inside the window, **anyone except the funder** may `release`.
+2. Before `window_start`, **only the funder** may `cancel` → native refund via `emit_transfer`.
+3. Inside the window (`window_start <= now < window_end`), **anyone except the funder** may `release`.
    Official fetch:
-   - PyPI `https://pypi.org/pypi/{pkg}/{ver}/json`
-   - npm `https://registry.npmjs.org/{pkg}/{ver}`
-   - 200 + not yanked + publish_time in [start, end] → `RELEASED` pay recipient
-   - 404 / miss / yanked / out of window → `REFUND_NOHIT` pay funder
-   - 5xx / oversize / non-JSON → `INSUFFICIENT` pay funder (fail closed)
-4. After expire instant (`end + 7d`) anyone may `expire` → refund funder.
-5. `withdraw` uses `emit_transfer` **before** clearing credit.
+   - PyPI `https://pypi.org/pypi/{pkg}/{ver}/json` (parsed via `urls[]` upload timestamps)
+   - npm `https://registry.npmjs.org/{pkg}/{ver}` (parsed via `time` and `versions` mappings)
+   - In-window publication: `200` + not yanked + `publish_time` in `[start, end]` → `RELEASED` pays recipient.
+   - Early check / not published yet: HTTP 404 (`EARLY_404_RETRYABLE`), temporary registry failure, 5xx, 429, 403, redirects, oversize, non-JSON, or inconclusive response leaves the escrow **`OPEN` and retryable** with intact funds (no payout, no refund, economics unchanged). It does **not** refund the funder and does **not** enter `INSUFFICIENT`.
+4. At or after `window_end` (`now >= window_end`):
+   - In-window publication: An artifact published within `[start, end]` still settles as `RELEASED` paying recipient at any time before expiration (`now < expire_at`).
+   - Final refund (`REFUND_NOHIT` paying funder): Requires qualifying evidence at or after `window_end`:
+     - Verified 404 / package or version does not exist (`WINDOW_EXPIRED_NO_RELEASE`).
+     - Verified yanked version (`YANKED`).
+     - Verified timestamped publication strictly outside the window (`PUBLISHED_BEFORE_WINDOW` or `PUBLISHED_AFTER_WINDOW`).
+   - Registry failures: 5xx, 429, 403, redirects, oversize, non-JSON, or inconclusive responses lacking complete evidence **leave the escrow `OPEN`** (e.g. `POST_WINDOW_UNAVAILABLE`, `POST_WINDOW_INSUFFICIENT_EVIDENCE`), preventing premature or erroneous refunds without conclusive proof.
+5. After expire instant (`end + 7d`), anyone may call `expire` → refunds funder.
+6. `withdraw` uses `emit_transfer` **before** clearing credit.
 
 ## Why GenLayer
 The page is live HTTP. Validators fetch it independently. Equivalence is `gl.eq_principle.strict_eq` on a parsed metadata object. Payout is the same consensus write.
@@ -76,7 +82,7 @@ Do not put `800` into a phase timeout (Studio Next bounds are 30–600).
 python -m pytest tests/direct -q
 ```
 **35 passed**.
-Covered: hash IDs, 24h / 14d gates, latest/url reject, funder≠recipient, lookback published / yanked / 404, funder cannot release, cancel before start, cancel after start reverts, release before window, RELEASED, yanked and 404 → REFUND_NOHIT, 5xx and non-JSON → INSUFFICIENT, double release, expire bounds, fake id, withdraw ordering, list_ids, economics.
+Covered: deterministic hash IDs, concurrent distinct IDs, early 404 leaves OPEN & retryable then settles on later success, unexpected HTTP statuses (429/403/301/500) leave OPEN before and after window, fund lookback permits only verified absent, npm deprecated vs yanked, realistic large npm responses & oversize caps, now_dt explicit timestamp requirement, scoped npm packages, window-end refund boundary, in-window publication settling after window-end, PyPI multi-file earliest non-yanked selection, yanked release refunds funder, economics across all transitions, 24h & 14d gates, latest/url reject, funder≠recipient, funder cannot release, cancel before start, cancel after start reverts, release before window reverts, double release reverts, expire grace bounds, list_ids parity, withdraw ordering, end-to-end matching flow, and fail-closed handling of missing/malformed npm/PyPI metadata leaving escrows OPEN.
 Full matrix: [TESTCASES.md](./TESTCASES.md)
 
 ## Live smoke & steward evidence on Studio Next (Chain 61997)
@@ -119,8 +125,8 @@ Framework: Next.js.
 - Settlement is a real transfer, not a ledger-only wipe
 - Funder cannot self-release
 - Window + cancel cannot bypass a live challenge once start hits
-- Feed failure fail-closed (`INSUFFICIENT`)
-- 404 future-ship is allowed at fund, exhaustive at release
+- Feed failures & early 404s fail-safe: leave escrow OPEN & retryable, never premature refund or INSUFFICIENT
+- 404 future-ship is allowed at fund, qualifying evidence required at or after window_end for final REFUND_NOHIT
 - No appeal / passport / leaderboard / court chrome
 
 ## License

@@ -55,7 +55,7 @@ The following transactions and escrows have been audited against scripts and ver
 
 ## 3. Fail-Closed Evidence Harness Architecture
 
-To guarantee that rerun, timeout, or interruption never results in double-submission, state corruption, or false verification claims, both runners (`settle_404_escrows.mjs` and `release_candidate_escrows.mjs`) implement strict safety invariants via [`scripts/evidence_helper.mjs`](file:///d:/shiplock/scripts/evidence_helper.mjs):
+To guarantee that rerun, timeout, or interruption never results in double-submission, state corruption, or false verification claims, both runners (`settle_404_escrows.mjs` and `release_candidate_escrows.mjs`) implement strict safety invariants via [`scripts/evidence_helper.mjs`](scripts/evidence_helper.mjs):
 
 1. **PyPI Version Endpoint Parity (`urls[]` parsing)**:
    - Matches `contracts/shiplock.py:126-200` by parsing `data.urls[]` rather than assuming a `releases` key exists (which does not exist at `https://pypi.org/pypi/{package}/{version}/json`).
@@ -130,8 +130,8 @@ Under `contracts/shiplock.py` (lines 548, 570), an artifact published **inside**
 
 ### Prepared Package Artifacts
 Clean, minimal package sources have been staged in the repository:
-- PyPI: [`packages/shiplock-steward-release-live/pypi/`](file:///d:/shiplock/packages/shiplock-steward-release-live/pypi/) (`pyproject.toml`, `README.md`, `__init__.py`)
-- npm: [`packages/shiplock-steward-release-live/npm/`](file:///d:/shiplock/packages/shiplock-steward-release-live/npm/) (`package.json`, `README.md`, `index.js`)
+- PyPI: [`packages/shiplock-steward-release-live/pypi/`](packages/shiplock-steward-release-live/pypi/) (`pyproject.toml`, `README.md`, `__init__.py`)
+- npm: [`packages/shiplock-steward-release-live/npm/`](packages/shiplock-steward-release-live/npm/) (`package.json`, `README.md`, `index.js`)
 
 Both package names were verified as available on public registries:
 - PyPI: `https://pypi.org/pypi/shiplock-steward-release-live/json` $\rightarrow$ HTTP `404 Not Found`
@@ -164,7 +164,7 @@ Registry credentials must never be passed in command arguments, chat, logs, or c
 
 ## 6. Secret Audit Scope & Precision
 
-- **Scope**: Scanned the *active tracked tree on `main`* using [`scripts/audit_secrets.py`](file:///d:/shiplock/scripts/audit_secrets.py).
+- **Scope**: Scanned the *active tracked tree on `main`* using [`scripts/audit_secrets.py`](scripts/audit_secrets.py).
 - **Findings**: **0 plaintext private keys, 0 passwords, 0 decrypted keystores, 0 `.env.local` files tracked**.
 - **Important Qualification**: Sensitive local development files (`.deployer_keystore.json`, `web/.env.local`) are excluded via `.gitignore`. This audit certifies the clean state of the active commit tree and does not rewrite or erase historical Git commits.
 
