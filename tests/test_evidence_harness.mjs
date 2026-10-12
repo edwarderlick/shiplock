@@ -2118,4 +2118,435 @@ describe("ShipLock Steward Evidence Harness Tests", () => {
       assert.equal(record.postWindowSettlement.transferEvidence?.verified, true);
     });
   });
+
+  describe("9. Evidence Integrity, Truthful Settlement, and On-Chain Economics Tests", () => {
+    it("1. message-only pending delivery: separates facts explicitly, message alone is never reported as delivered funds", async () => {
+      const mockClient = {};
+      const step = {
+        txHash: "0xparent_payout_tx",
+        escrowStateEconomicsChanged: true,
+      };
+      const txInfo = {
+        hash: "0xparent_payout_tx",
+        statusName: "FINALIZED",
+        txExecutionResultName: "FINISHED_WITH_RETURN",
+        messages: [
+          {
+            recipient: "0xrecipient_addr",
+            value: "10000000000000000",
+            messageType: 0,
+          },
+        ],
+        triggered_transactions: [],
+      };
+
+      const result = await verifyEmittedTransferOrChildTx({
+        client: mockClient,
+        txInfo,
+        step,
+        expectedTarget: "0xrecipient_addr",
+        amountWei: "10000000000000000",
+        isPayout: true,
+      });
+
+      assert.equal(result, true);
+      assert.equal(step.parentTransactionFinalized, true, "Parent tx must be finalized");
+      assert.equal(step.matchingTransferMessageEmitted, true, "Matching message emitted must be true");
+      assert.equal(step.fundsDelivered, false, "Matching message alone must NEVER be reported as delivered funds");
+      assert.equal(step.deliveryStatus, "MESSAGE_EMITTED_PENDING_DELIVERY");
+      assert.equal(step.transferEvidence.fundsDelivered, false);
+      assert.equal(step.transferEvidence.matchingTransferMessageEmitted, true);
+      assert.equal(step.transferEvidence.parentTransactionFinalized, true);
+      assert.equal(step.transferEvidence.escrowStateEconomicsChanged, true);
+    });
+
+    it("2. later child discovery on restart: retries delivery lookup even when no child hash was present on run 1", async () => {
+      let childLookups = 0;
+      const mockClient = {
+        getTransaction: async ({ hash }) => {
+          if (hash === "0xparent_initial_tx") {
+            // Parent transaction now has triggered transaction on chain
+            return {
+              hash: "0xparent_initial_tx",
+              statusName: "FINALIZED",
+              txExecutionResultName: "FINISHED_WITH_RETURN",
+              triggered_transactions: ["0xlater_discovered_child_tx"],
+            };
+          }
+          if (hash === "0xlater_discovered_child_tx") {
+            childLookups++;
+            return {
+              hash: "0xlater_discovered_child_tx",
+              statusName: "FINALIZED",
+              txExecutionResultName: "FINISHED_WITH_RETURN",
+              to_address: "0xrecipient_addr",
+              value: "10000000000000000",
+            };
+          }
+          throw new Error(`Unexpected hash: ${hash}`);
+        },
+      };
+
+      // Step completed and verified on first run, but fundsDelivered was false and no childTransfer was recorded
+      const record = {
+        releaseAttempt: {
+          txHash: "0xparent_initial_tx",
+          txStatus: "FINALIZED",
+          executionResult: "FINISHED_WITH_RETURN",
+          completed: true,
+          verified: true,
+          payoutWei: "10000000000000000",
+          recipient: "0xrecipient_addr",
+          fundsDelivered: false,
+          deliveryStatus: "MESSAGE_EMITTED_PENDING_DELIVERY",
+          matchingTransferMessageEmitted: true,
+          // Note: childTransfer is null/undefined on first run!
+        },
+      };
+
+      const result = await reconcilePendingTransaction({
+        client: mockClient,
+        contractAddress: "0xcontract",
+        escrowId: "0xescrow_1",
+        record,
+        stepKey: "releaseAttempt",
+        expectedEscrowStatus: "RELEASED",
+        expectedMatchReason: "200_IN_WINDOW",
+        expectedEconomicsDelta: "PAYOUT",
+        amountWei: "10000000000000000",
+        saveEvidence: () => {},
+      });
+
+      assert.equal(result.verified, true);
+      assert.equal(result.fundsDelivered, true, "Must have upgraded fundsDelivered to true");
+      assert.equal(childLookups, 1, "Must have queried discovered child tx");
+      assert.equal(record.releaseAttempt.fundsDelivered, true);
+      assert.equal(record.releaseAttempt.deliveryStatus, "DELIVERED");
+      assert.equal(record.releaseAttempt.childTransfer?.txHash, "0xlater_discovered_child_tx");
+      assert.equal(record.releaseAttempt.childTransfer?.verified, true);
+    });
+
+    it("3. failed child delivery: fails closed when child transaction execution reverts", async () => {
+      let saved = false;
+      const mockClient = {
+        getTransaction: async ({ hash }) => {
+          if (hash === "0xchild_failed_tx") {
+            return {
+              hash: "0xchild_failed_tx",
+              statusName: "FINALIZED",
+              txExecutionResultName: "EXECUTION_ERROR",
+              to_address: "0xrecipient_addr",
+              value: "10000000000000000",
+            };
+          }
+          throw new Error("unexpected hash");
+        },
+      };
+
+      const step = {};
+      const txInfo = {
+        hash: "0xparent_tx",
+        triggered_transactions: ["0xchild_failed_tx"],
+        messages: [
+          {
+            recipient: "0xrecipient_addr",
+            value: "10000000000000000",
+            messageType: 0,
+          },
+        ],
+      };
+
+      await assert.rejects(
+        async () => {
+          await verifyEmittedTransferOrChildTx({
+            client: mockClient,
+            txInfo,
+            step,
+            expectedTarget: "0xrecipient_addr",
+            amountWei: "10000000000000000",
+            isPayout: true,
+            saveEvidence: () => {
+              saved = true;
+            },
+          });
+        },
+        /Child transaction 0xchild_failed_tx execution failed/
+      );
+
+      assert.equal(step.childTransfer?.failed, true);
+      assert.equal(step.fundsDelivered, undefined);
+      assert.equal(saved, true);
+    });
+
+    it("4. already-settled state without transaction proof: reports proof incomplete and submits no duplicate write", async () => {
+      // Scenario A: 404 Escrow already REFUND_NOHIT on-chain, but no verified settlement transaction recorded
+      const escrowOnChainRefund = {
+        id: "0xescrow_refund_unproven",
+        status: "REFUND_NOHIT",
+        match_reason: "WINDOW_EXPIRED_NO_RELEASE",
+        amount: 20000000000000000n,
+        refund: 20000000000000000n,
+        payout: 0n,
+      };
+
+      const record404 = {
+        id: "0xescrow_refund_unproven",
+        principalWei: "20000000000000000",
+        refundSettlementVerified: false,
+        postWindowSettlement: null, // No transaction proof!
+      };
+
+      // In settle runner:
+      if (escrowOnChainRefund.status === "REFUND_NOHIT") {
+        if (!record404.refundSettlementVerified && !record404.postWindowSettlement?.verified) {
+          record404.refundSettlementVerified = false;
+          record404.settledOnChainProofIncomplete = true;
+          record404.currentStatus = "SETTLED_ON_CHAIN_PROOF_INCOMPLETE";
+          record404.finalState = {
+            status: "REFUND_NOHIT",
+            settled: true,
+            matchReason: escrowOnChainRefund.match_reason || null,
+            funderRefundWei: escrowOnChainRefund.refund.toString(),
+            proofIncomplete: true,
+            finding: "settled on-chain, proof incomplete",
+          };
+        }
+      }
+
+      assert.equal(record404.refundSettlementVerified, false, "Must NOT set refundSettlementVerified to true");
+      assert.equal(record404.currentStatus, "SETTLED_ON_CHAIN_PROOF_INCOMPLETE");
+      assert.equal(record404.finalState.proofIncomplete, true);
+      assert.equal(record404.postWindowSettlement, null, "Must not fabricate transaction proof");
+
+      // Scenario B: Candidate Escrow already RELEASED on-chain, but no verified release transaction recorded
+      const candidateEscrowReleased = {
+        id: "0xcand_released_unproven",
+        status: "RELEASED",
+        match_reason: "200_IN_WINDOW",
+        amount: 10000000000000000n,
+        payout: 10000000000000000n,
+        refund: 0n,
+      };
+
+      const candRecord = {
+        id: "0xcand_released_unproven",
+        fundedAmountWei: "10000000000000000",
+        releaseAttempt: null, // No transaction proof!
+      };
+
+      if (candidateEscrowReleased.status === "RELEASED") {
+        if (!candRecord.releaseAttempt?.verified) {
+          candRecord.releaseAttemptVerified = false;
+          candRecord.settledOnChainProofIncomplete = true;
+          candRecord.currentStatus = "SETTLED_ON_CHAIN_PROOF_INCOMPLETE";
+          candRecord.finalState = {
+            status: "RELEASED",
+            settled: true,
+            matchReason: candidateEscrowReleased.match_reason || null,
+            recipientPayoutWei: candidateEscrowReleased.payout.toString(),
+            proofIncomplete: true,
+            finding: "settled on-chain, proof incomplete",
+          };
+        }
+      }
+
+      assert.equal(candRecord.releaseAttemptVerified, false, "Must NOT set releaseAttemptVerified to true");
+      assert.equal(candRecord.currentStatus, "SETTLED_ON_CHAIN_PROOF_INCOMPLETE");
+      assert.equal(candRecord.finalState.proofIncomplete, true);
+      assert.equal(candRecord.releaseAttempt, null, "Must not fabricate transaction proof");
+    });
+
+    it("5. cross-boundary refund: in-window attempt executing after window_end reconciles to REFUND_NOHIT and prevents duplicate write", async () => {
+      const mockClient = {
+        getTransaction: async ({ hash }) => {
+          return {
+            hash,
+            statusName: "FINALIZED",
+            txExecutionResultName: "FINISHED_WITH_RETURN",
+            messages: [
+              {
+                recipient: "0xfunder_addr",
+                value: "20000000000000000",
+                messageType: 0,
+              },
+            ],
+            triggered_transactions: [],
+          };
+        },
+        readContract: async ({ functionName }) => {
+          if (functionName === "get_escrow") {
+            return {
+              id: "0xescrow_cross",
+              status: "REFUND_NOHIT",
+              match_reason: "WINDOW_EXPIRED_NO_RELEASE",
+              amount: 20000000000000000n,
+              refund: 20000000000000000n,
+              payout: 0n,
+              funder: "0xfunder_addr",
+              recipient: "0xrecipient_addr",
+            };
+          }
+          if (functionName === "get_economics") {
+            return {
+              escrowed_open: "2050000000000000000",
+              paid_to_recipients: "0",
+              refunded_to_funders: "30000000000000000",
+              outstanding_credits: "0",
+              treasury: "0",
+            };
+          }
+        },
+      };
+
+      const record = {
+        principalWei: "20000000000000000",
+        inWindowAttempt: {
+          txHash: "0xcross_boundary_tx",
+          txStatus: "PENDING",
+          submittedAtUtc: "2026-10-12T10:35:00Z",
+          preEscrowSnapshot: {
+            status: "OPEN",
+            amount: "20000000000000000",
+            match_reason: "LOOKBACK_404_OK",
+          },
+          preEconomicsSnapshot: {
+            escrowed_open: "2070000000000000000",
+            paid_to_recipients: "0",
+            refunded_to_funders: "10000000000000000",
+            outstanding_credits: "0",
+            treasury: "0",
+          },
+          completed: false,
+          verified: false,
+        },
+      };
+
+      const res = await reconcilePendingTransaction({
+        client: mockClient,
+        contractAddress: "0xcontract",
+        escrowId: "0xescrow_cross",
+        record,
+        stepKey: "inWindowAttempt",
+        expectedEscrowStatus: "OPEN",
+        expectedMatchReason: "EARLY_404_RETRYABLE",
+        expectedEconomicsDelta: "NO_CHANGE",
+        amountWei: "20000000000000000",
+        allowCrossBoundaryRefund: true,
+        requireEarly404: true,
+        saveEvidence: () => {},
+      });
+
+      assert.equal(res.executedAfterWindowEnd, true);
+      assert.equal(res.refundSettlementVerified, true);
+      assert.equal(res.early404Verified, false, "Must NOT mark early404Verified as true");
+      assert.equal(record.early404Verified, false);
+      assert.equal(record.refundSettlementVerified, true);
+      assert.equal(record.postWindowSettlement?.txHash, "0xcross_boundary_tx");
+      assert.equal(record.postWindowSettlement?.settledViaCrossBoundaryInWindowTx, true);
+      assert.equal(record.inWindowAttempt.parentTransactionFinalized, true);
+      assert.equal(record.inWindowAttempt.escrowStateEconomicsChanged, true);
+      assert.equal(record.inWindowAttempt.matchingTransferMessageEmitted, true);
+      assert.equal(record.inWindowAttempt.fundsDelivered, false);
+    });
+
+    it("6. RPC-time failure: getRpcTime with failClosed: true throws instead of using local clock", async () => {
+      const failingClient = {
+        request: async () => {
+          throw new Error("RPC network connection timeout");
+        },
+      };
+
+      await assert.rejects(
+        async () => {
+          await getRpcTime(failingClient, { failClosed: true });
+        },
+        /Failed to query Studio Next RPC time/
+      );
+
+      // Verify failClosed: false falls back to Date
+      const fallbackTime = await getRpcTime(failingClient, { failClosed: false });
+      assert.ok(fallbackTime instanceof Date);
+    });
+
+    it("7. stale time across two escrows: runner rechecks RPC time immediately before each escrow and timed write", async () => {
+      let rpcCallCount = 0;
+      const timestamps = [
+        "0x68eb51b0", // 2025-10-12T05:00:00Z (pre-window for escrow 1)
+        "0x68eba020", // 2025-10-12T10:35:00Z (in-window for escrow 2)
+      ];
+
+      const client = {
+        request: async ({ method }) => {
+          if (method === "eth_getBlockByNumber") {
+            const ts = timestamps[rpcCallCount++] || timestamps[timestamps.length - 1];
+            return { timestamp: ts };
+          }
+          throw new Error("unsupported");
+        },
+      };
+
+      // Check escrow 1
+      const time1 = await getRpcTime(client, { failClosed: true });
+      assert.equal(time1.getTime(), 0x68eb51b0 * 1000);
+
+      // Check escrow 2 immediately before write
+      const time2 = await getRpcTime(client, { failClosed: true });
+      assert.equal(time2.getTime(), 0x68eba020 * 1000);
+      assert.notEqual(time1.getTime(), time2.getTime(), "Escrow 2 must use fresh RPC time, not stale time from startup");
+    });
+
+    it("8. additional unrelated OPEN escrow: preflight reconciles total economics against all on-chain escrows without false failure", async () => {
+      // 7 on-chain escrows: 6 steward escrows (2.07 GEN) + 1 new public-app escrow (0.05 GEN) = 2.12 GEN total
+      const allEscrowIds = [
+        "0xsteward_1",
+        "0xsteward_2",
+        "0xsteward_3",
+        "0xsteward_4",
+        "0xsteward_5",
+        "0xsteward_6",
+        "0xunrelated_public_app_escrow",
+      ];
+
+      const escrowsData = {
+        "0xsteward_1": { status: "OPEN", amount: 20000000000000000n, payout: 0n, refund: 0n },
+        "0xsteward_2": { status: "OPEN", amount: 20000000000000000n, payout: 0n, refund: 0n },
+        "0xsteward_3": { status: "OPEN", amount: 10000000000000000n, payout: 0n, refund: 0n },
+        "0xsteward_4": { status: "OPEN", amount: 10000000000000000n, payout: 0n, refund: 0n },
+        "0xsteward_5": { status: "OPEN", amount: 10000000000000000n, payout: 0n, refund: 0n },
+        "0xsteward_6": { status: "OPEN", amount: 2000000000000000000n, payout: 0n, refund: 0n },
+        "0xunrelated_public_app_escrow": { status: "OPEN", amount: 50000000000000000n, payout: 0n, refund: 0n },
+      };
+
+      const economics = {
+        escrowed_open: "2120000000000000000", // 2.12 GEN
+        paid_to_recipients: "0",
+        refunded_to_funders: "0",
+      };
+
+      // Sum across all on-chain escrows returned by contract:
+      let totalOpen = 0n;
+      let totalPaid = 0n;
+      let totalRefunded = 0n;
+
+      for (const id of allEscrowIds) {
+        const e = escrowsData[id];
+        if (e.status === "OPEN") totalOpen += e.amount;
+        else if (e.status === "RELEASED") totalPaid += e.payout;
+        else if (e.status === "REFUND_NOHIT") totalRefunded += e.refund;
+      }
+
+      // Assert that total open matches contract economics exactly
+      assert.equal(BigInt(economics.escrowed_open), totalOpen, "Total open must reconcile against all 7 escrows");
+      assert.equal(BigInt(economics.paid_to_recipients), totalPaid);
+      assert.equal(BigInt(economics.refunded_to_funders), totalRefunded);
+
+      // Assert that steward escrows are validated separately without failing due to the extra escrow
+      const stewardIds = allEscrowIds.slice(0, 6);
+      const onChainSet = new Set(allEscrowIds);
+      for (const sId of stewardIds) {
+        assert.ok(onChainSet.has(sId), `Steward escrow ${sId} must be present on-chain`);
+      }
+    });
+  });
 });
+

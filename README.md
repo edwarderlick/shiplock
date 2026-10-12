@@ -22,7 +22,7 @@ Same write. No docket. No appeal UI. No court.
 | Source Hash (SHA-256) | `be743c1a8277716d21018911352fe9d7ccd3dd30fb1b8d829d19384133401a0e` (Verified 100% parity) |
 | Tests | `python -m pytest` → **48 passed** (35 direct contract tests + 13 deployer keystore tests) |
 | Web Tests | `npm --prefix web test` → **69 passed** (15 suites) |
-| Evidence Tests | `node --test tests/test_evidence_harness.mjs` → **41 passed** (9 suites) |
+| Evidence Tests | `node --test tests/test_evidence_harness.mjs` → **55 passed** (10 suites) |
 | Live on-chain smoke | Verified on Studio Next: PyPI & npm 404 escrows, cancel/refund, candidate release escrows ([EVIDENCE.md](./EVIDENCE.md)) |
 | Steward Evidence | [EVIDENCE.md](./EVIDENCE.md) · [steward_evidence.json](./scripts/steward_evidence.json) |
 

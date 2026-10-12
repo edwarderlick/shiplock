@@ -50,14 +50,97 @@ async function main() {
     refunded_to_funders: economics.refunded_to_funders?.toString(),
   });
 
-  // 2. Query each escrow and track dynamic stage-aware accounting totals
-  console.log("\n--- 2. Escrows Preflight Status & Fee Estimation ---");
-  let dynamicExpectedOpen = 0n;
-  let dynamicExpectedPaid = 0n;
-  let dynamicExpectedRefunded = 0n;
+  // 2. Query all on-chain escrow IDs and reconcile economics against EVERY escrow returned by the contract
+  console.log("\n--- 2. Reconciling Economics Against All On-Chain Escrows ---");
+  let allOnChainIds = null;
+  try {
+    allOnChainIds = await client.readContract({
+      address: CONTRACT_ADDRESS,
+      functionName: "get_escrow_ids",
+      args: [],
+    });
+  } catch (err) {
+    throw new Error(`Failed to query get_escrow_ids from contract: ${err.message || err}`);
+  }
+
+  if (!Array.isArray(allOnChainIds)) {
+    throw new Error("get_escrow_ids did not return an array");
+  }
+  console.log(`Found ${allOnChainIds.length} total escrow(s) on-chain.`);
+
+  let totalOnChainOpen = 0n;
+  let totalOnChainPaid = 0n;
+  let totalOnChainRefunded = 0n;
+
+  for (const escId of allOnChainIds) {
+    const esc = await client.readContract({
+      address: CONTRACT_ADDRESS,
+      functionName: "get_escrow",
+      args: [escId],
+    });
+    if (!esc || !esc.status) {
+      throw new Error(`On-chain escrow ${escId} returned empty or invalid data`);
+    }
+
+    const principalWei = BigInt((esc.principal_wei || esc.amount || 0n).toString());
+    const payoutWei = BigInt((esc.payout_recipient || esc.payout || 0n).toString());
+    const refundWei = BigInt((esc.refund_funder || esc.refund || 0n).toString());
+
+    if (esc.status === "OPEN") {
+      totalOnChainOpen += principalWei;
+      if (payoutWei !== 0n || refundWei !== 0n) {
+        throw new Error(`On-chain escrow ${escId} is OPEN but has non-zero payout (${payoutWei}) or refund (${refundWei})`);
+      }
+    } else if (esc.status === "RELEASED") {
+      totalOnChainPaid += principalWei;
+      if (payoutWei !== principalWei) {
+        throw new Error(`On-chain escrow ${escId} is RELEASED but payout (${payoutWei}) does not match principal (${principalWei})`);
+      }
+    } else if (esc.status === "REFUND_NOHIT" || esc.status === "CANCELED" || esc.status === "EXPIRED") {
+      totalOnChainRefunded += principalWei;
+      if (refundWei !== principalWei) {
+        throw new Error(`On-chain escrow ${escId} is ${esc.status} but refund (${refundWei}) does not match principal (${principalWei})`);
+      }
+    } else {
+      throw new Error(`On-chain escrow ${escId} has unrecognized status: ${esc.status}`);
+    }
+  }
+
+  const escrowedOpenWei = BigInt(economics.escrowed_open.toString());
+  const paidToRecipientsWei = BigInt(economics.paid_to_recipients.toString());
+  const refundedToFundersWei = BigInt(economics.refunded_to_funders.toString());
+
+  console.log(`  Contract escrowed_open:      ${escrowedOpenWei.toString()} wei (sum of all on-chain OPEN: ${totalOnChainOpen.toString()})`);
+  console.log(`  Contract paid_to_recipients:  ${paidToRecipientsWei.toString()} wei (sum of all on-chain RELEASED: ${totalOnChainPaid.toString()})`);
+  console.log(`  Contract refunded_to_funders: ${refundedToFundersWei.toString()} wei (sum of all on-chain REFUNDED: ${totalOnChainRefunded.toString()})`);
+
+  if (escrowedOpenWei !== totalOnChainOpen) {
+    throw new Error(
+      `Economics mismatch: contract escrowed_open (${escrowedOpenWei}) does not match sum of all on-chain OPEN escrows (${totalOnChainOpen})`
+    );
+  }
+  if (paidToRecipientsWei !== totalOnChainPaid) {
+    throw new Error(
+      `Economics mismatch: contract paid_to_recipients (${paidToRecipientsWei}) does not match sum of all on-chain RELEASED escrows (${totalOnChainPaid})`
+    );
+  }
+  if (refundedToFundersWei !== totalOnChainRefunded) {
+    throw new Error(
+      `Economics mismatch: contract refunded_to_funders (${refundedToFundersWei}) does not match sum of all on-chain refunded escrows (${totalOnChainRefunded})`
+    );
+  }
+  console.log("  ✓ Economics reconciled against every on-chain escrow returned by contract.");
+
+  // 3. Separately validate the steward evidence escrows
+  console.log("\n--- 3. Steward Evidence Escrows Validation & Authoritative Fee Estimation ---");
+  const onChainIdSet = new Set(allOnChainIds.map((x) => String(x).toLowerCase()));
 
   for (const item of ESCROWS_TO_CHECK) {
-    console.log(`\nChecking ${item.name} (${item.id})...`);
+    console.log(`\nChecking steward escrow ${item.name} (${item.id})...`);
+    if (!onChainIdSet.has(item.id.toLowerCase())) {
+      throw new Error(`Steward evidence escrow ${item.name} (${item.id}) not found among on-chain escrow IDs!`);
+    }
+
     let esc = null;
     try {
       esc = await client.readContract({
@@ -66,11 +149,11 @@ async function main() {
         args: [item.id],
       });
     } catch (readErr) {
-      throw new Error(`Failed to read escrow ${item.name} (${item.id}): ${readErr.message || readErr}`);
+      throw new Error(`Failed to read steward escrow ${item.name} (${item.id}): ${readErr.message || readErr}`);
     }
 
     if (!esc || !esc.status) {
-      throw new Error(`Escrow ${item.name} (${item.id}) returned empty or invalid data`);
+      throw new Error(`Steward escrow ${item.name} (${item.id}) returned empty or invalid data`);
     }
 
     const principalWei = BigInt((esc.principal_wei || esc.amount || 0n).toString());
@@ -82,61 +165,54 @@ async function main() {
 
     // Verify principal matches expected allocation
     if (item.expectedAmount && principalWei !== item.expectedAmount) {
-      throw new Error(`Escrow ${item.name} principal mismatch: expected ${item.expectedAmount.toString()}, got ${principalWei.toString()}`);
+      throw new Error(`Steward escrow ${item.name} principal mismatch: expected ${item.expectedAmount.toString()}, got ${principalWei.toString()}`);
     }
 
-    // Stage-aware status validation
+    // Stage-aware status validation for steward escrows
     const VALID_LIFECYCLE_STATUSES = ["OPEN", "RELEASED", "REFUND_NOHIT", "CANCELED", "EXPIRED"];
     if (!VALID_LIFECYCLE_STATUSES.includes(esc.status)) {
-      throw new Error(`Escrow ${item.name} has unrecognized status: ${esc.status}`);
+      throw new Error(`Steward escrow ${item.name} has unrecognized status: ${esc.status}`);
     }
 
     if (esc.status === "OPEN") {
-      dynamicExpectedOpen += principalWei;
       if (payoutWei !== 0n || refundWei !== 0n) {
-        throw new Error(`Escrow ${item.name} is OPEN but has non-zero payout (${payoutWei}) or refund (${refundWei})`);
+        throw new Error(`Steward escrow ${item.name} is OPEN but has non-zero payout (${payoutWei}) or refund (${refundWei})`);
       }
     } else if (esc.status === "RELEASED") {
-      dynamicExpectedPaid += principalWei;
       if (esc.match_reason !== "200_IN_WINDOW") {
-        throw new Error(`Escrow ${item.name} is RELEASED but match_reason is '${esc.match_reason}' (expected 200_IN_WINDOW)`);
+        throw new Error(`Steward escrow ${item.name} is RELEASED but match_reason is '${esc.match_reason}' (expected 200_IN_WINDOW)`);
       }
       if (payoutWei !== principalWei) {
-        throw new Error(`Escrow ${item.name} is RELEASED but payout (${payoutWei}) does not match principal (${principalWei})`);
+        throw new Error(`Steward escrow ${item.name} is RELEASED but payout (${payoutWei}) does not match principal (${principalWei})`);
       }
       console.log(`  ✓ Verified legitimate terminal RELEASED settlement state (payout: ${payoutWei} wei)`);
     } else if (esc.status === "REFUND_NOHIT") {
-      dynamicExpectedRefunded += principalWei;
       if (refundWei !== principalWei) {
-        throw new Error(`Escrow ${item.name} is REFUND_NOHIT but refund (${refundWei}) does not match principal (${principalWei})`);
+        throw new Error(`Steward escrow ${item.name} is REFUND_NOHIT but refund (${refundWei}) does not match principal (${principalWei})`);
       }
       if (payoutWei !== 0n) {
-        throw new Error(`Escrow ${item.name} is REFUND_NOHIT but payout (${payoutWei}) is non-zero`);
+        throw new Error(`Steward escrow ${item.name} is REFUND_NOHIT but payout (${payoutWei}) is non-zero`);
       }
       console.log(`  ✓ Verified legitimate terminal REFUND_NOHIT settlement state (refund: ${refundWei} wei, match_reason: ${esc.match_reason})`);
     } else if (esc.status === "CANCELED") {
-      dynamicExpectedRefunded += principalWei;
-      // In contracts/shiplock.py:cancel, status and refund are updated, but match_reason is not overwritten
       if (refundWei !== principalWei) {
-        throw new Error(`Escrow ${item.name} is CANCELED but refund (${refundWei}) does not match principal (${principalWei})`);
+        throw new Error(`Steward escrow ${item.name} is CANCELED but refund (${refundWei}) does not match principal (${principalWei})`);
       }
       if (payoutWei !== 0n) {
-        throw new Error(`Escrow ${item.name} is CANCELED but payout (${payoutWei}) is non-zero`);
+        throw new Error(`Steward escrow ${item.name} is CANCELED but payout (${payoutWei}) is non-zero`);
       }
-      console.log(`  ✓ Verified legitimate terminal CANCELED settlement state (refund: ${refundWei} wei, match_reason preserved: ${esc.match_reason})`);
+      console.log(`  ✓ Verified legitimate terminal CANCELED settlement state (refund: ${refundWei} wei, match_reason: ${esc.match_reason})`);
     } else if (esc.status === "EXPIRED") {
-      dynamicExpectedRefunded += principalWei;
-      // In contracts/shiplock.py:expire, status and refund are updated, but match_reason is not overwritten
       if (refundWei !== principalWei) {
-        throw new Error(`Escrow ${item.name} is EXPIRED but refund (${refundWei}) does not match principal (${principalWei})`);
+        throw new Error(`Steward escrow ${item.name} is EXPIRED but refund (${refundWei}) does not match principal (${principalWei})`);
       }
       if (payoutWei !== 0n) {
-        throw new Error(`Escrow ${item.name} is EXPIRED but payout (${payoutWei}) is non-zero`);
+        throw new Error(`Steward escrow ${item.name} is EXPIRED but payout (${payoutWei}) is non-zero`);
       }
-      console.log(`  ✓ Verified legitimate terminal EXPIRED settlement state (refund: ${refundWei} wei, match_reason preserved: ${esc.match_reason})`);
+      console.log(`  ✓ Verified legitimate terminal EXPIRED settlement state (refund: ${refundWei} wei, match_reason: ${esc.match_reason})`);
     }
 
-    // 3. Test allocation construction and authoritative fee estimation for OPEN escrows
+    // Test allocation construction and authoritative fee estimation for OPEN steward escrows
     if (esc.status === "OPEN" && item.testReleaseFees) {
       console.log(`  Testing allocation construction and authoritative fee estimation for release...`);
       const completeAllocs = buildReleaseMessageAllocations({
@@ -182,35 +258,8 @@ async function main() {
     }
   }
 
-  // Verify dynamic stage-aware economics invariants
-  console.log("\n--- 3. Stage-Aware Economics Reconciliation ---");
-  const escrowedOpenWei = BigInt(economics.escrowed_open.toString());
-  const paidToRecipientsWei = BigInt(economics.paid_to_recipients.toString());
-  const refundedToFundersWei = BigInt(economics.refunded_to_funders.toString());
-
-  console.log(`  Contract escrowed_open:      ${escrowedOpenWei.toString()} wei (expected: ${dynamicExpectedOpen.toString()})`);
-  console.log(`  Contract paid_to_recipients:  ${paidToRecipientsWei.toString()} wei (expected >= ${dynamicExpectedPaid.toString()})`);
-  console.log(`  Contract refunded_to_funders: ${refundedToFundersWei.toString()} wei (expected >= ${dynamicExpectedRefunded.toString()})`);
-
-  if (escrowedOpenWei !== dynamicExpectedOpen) {
-    throw new Error(
-      `Economics mismatch: contract escrowed_open (${escrowedOpenWei}) does not match sum of currently OPEN escrows (${dynamicExpectedOpen})`
-    );
-  }
-  if (paidToRecipientsWei < dynamicExpectedPaid) {
-    throw new Error(
-      `Economics mismatch: contract paid_to_recipients (${paidToRecipientsWei}) is less than sum of RELEASED escrows (${dynamicExpectedPaid})`
-    );
-  }
-  if (refundedToFundersWei < dynamicExpectedRefunded) {
-    throw new Error(
-      `Economics mismatch: contract refunded_to_funders (${refundedToFundersWei}) is less than sum of refunded/canceled escrows (${dynamicExpectedRefunded})`
-    );
-  }
-  console.log("  ✓ Stage-aware economics verified: all balances reconcile with on-chain escrow states.");
-
   console.log("\n=======================================================");
-  console.log("✓ Preflight check succeeded for all 6 escrows.");
+  console.log("✓ Preflight check succeeded for all on-chain and steward escrows.");
   console.log("✓ All escrow reads, allocation builds, and fee validations passed.");
   console.log("✓ No live transactions were submitted (read-only verification).");
   console.log("=======================================================\n");

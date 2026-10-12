@@ -129,17 +129,30 @@ async function main() {
     console.log(`  Expire At:     ${expStr}`);
 
     if (escrow.status === "RELEASED") {
-      console.log(`  [✓] Escrow already RELEASED on-chain.`);
+      if (cand.releaseAttempt?.verified) {
+        console.log(`  [✓] Escrow already fully settled as RELEASED with verified transaction proof.`);
+        continue;
+      }
+      console.log(`  [⚠️ NOTICE] Escrow ${cand.id} is already RELEASED on-chain, but transaction proof is incomplete.`);
+      cand.releaseAttemptVerified = false;
+      cand.settledOnChainProofIncomplete = true;
+      cand.currentStatus = "SETTLED_ON_CHAIN_PROOF_INCOMPLETE";
       cand.finalState = {
         status: "RELEASED",
         settled: true,
-        matchReason: escrow.match_reason,
-        publishTime: escrow.publish_time,
-        recipientPayoutWei: escrow.payout.toString(),
+        matchReason: escrow.match_reason || null,
+        publishTime: escrow.publish_time || null,
+        recipientPayoutWei: escrow.payout !== undefined ? escrow.payout.toString() : null,
+        proofIncomplete: true,
+        finding: "settled on-chain, proof incomplete",
       };
       saveEvidence();
       continue;
     }
+
+    // Recheck RPC block time immediately before evaluating time gates and timed writes (failClosed: true)
+    const now = await getRpcTime(readClient, { failClosed: true });
+    console.log(`  [⏰ TIME GATE] Current RPC block timestamp for ${cand.target}: ${now.toISOString()}`);
 
     // 2. LIVE HTTP CHECK OF OFFICIAL REGISTRY ENDPOINT
     console.log(`  [*] Querying official registry endpoint for ${cand.package}@${cand.version}...`);
@@ -147,7 +160,7 @@ async function main() {
     console.log(`      Registry Check: ${regCheck.summary} (HTTP ${regCheck.statusCode})`);
 
     cand.latestRegistryCheck = {
-      timestampUtc: now.toISOString(),
+      timestampUtc: new Date().toISOString(),
       ...regCheck,
     };
     saveEvidence();
@@ -230,6 +243,13 @@ async function main() {
     // 6. TRUSTWORTHY PUBLICATION INSIDE WINDOW CONFIRMED:
     // Execute write transaction with pre-transaction baseline snapshot persistence and fail-closed checks.
     console.log(`  [🎯 TRUSTWORTHY EVIDENCE] Valid non-yanked publication inside window at ${regCheck.publishTime}.`);
+
+    // Recheck RPC block time immediately before timed write (fail closed)
+    const writeNow = await getRpcTime(readClient, { failClosed: true });
+    if (writeNow < start || writeNow >= expire) {
+      throw new Error(`RPC block timestamp ${writeNow.toISOString()} is outside allowed release window. Aborting write.`);
+    }
+
     const caller = await getCallerAccount();
     const writeClient = createClient({ chain: studioDevnet, account: caller });
 

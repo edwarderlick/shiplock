@@ -550,7 +550,7 @@ export function syncAttemptHistory(record, step) {
  * Queries Studio Next RPC for current block timestamp using eth_getBlockByNumber("latest").
  * Falls back to local UTC if the RPC query fails or is unsupported in mock environments.
  */
-export async function getRpcTime(client) {
+export async function getRpcTime(client, { failClosed = false } = {}) {
   try {
     if (typeof client?.request === "function") {
       const block = await client.request({ method: "eth_getBlockByNumber", params: ["latest", false] });
@@ -565,7 +565,13 @@ export async function getRpcTime(client) {
         }
       }
     }
+    if (failClosed) {
+      throw new Error("RPC block response missing valid timestamp");
+    }
   } catch (err) {
+    if (failClosed) {
+      throw new Error(`Failed to query Studio Next RPC time (${err.message}). Fail closed for timed write.`);
+    }
     console.warn(`  [⚠️ NOTICE] Failed to query Studio Next RPC time (${err.message}). Falling back to local UTC.`);
   }
   const localDate = new Date();
@@ -795,8 +801,15 @@ export async function verifyEmittedTransferOrChildTx({
     );
   }
 
-  // 5. Distinguish "message emitted" from "funds delivered"
-  // Do NOT mark delivered without supporting on-chain evidence (childTxVerified).
+  // 5. Separate explicit facts:
+  // - parentTransactionFinalized: true (receipt verified finalized FINISHED_WITH_RETURN)
+  // - matchingTransferMessageEmitted: true (matching GenVM message found in txInfo.messages)
+  // - fundsDelivered: true ONLY when a finalized child transaction is proven
+  // Matching message alone must NEVER be reported as delivered funds!
+  step.parentTransactionFinalized = true;
+  step.messageEmitted = Boolean(messageEmitted);
+  step.matchingTransferMessageEmitted = Boolean(messageEmitted);
+
   if (childTxVerified) {
     step.fundsDelivered = true;
     step.deliveryStatus = "DELIVERED";
@@ -808,17 +821,20 @@ export async function verifyEmittedTransferOrChildTx({
     };
   } else {
     step.fundsDelivered = false;
-    step.deliveryStatus = "MESSAGE_EMITTED_PENDING_DELIVERY";
+    step.deliveryStatus = messageEmitted ? "MESSAGE_EMITTED_PENDING_DELIVERY" : "DELIVERY_UNPROVEN";
     step.deliveryEvidence = null;
   }
 
-  // 6. Record comprehensive transfer evidence
+  // 6. Record comprehensive transfer evidence with explicit facts
   step.transferEvidence = {
     verified: true,
     type: transferType,
     targetAddress: targetLower,
     amountWei: amtExpected.toString(),
+    parentTransactionFinalized: true,
+    escrowStateEconomicsChanged: Boolean(step.escrowStateEconomicsChanged),
     messageEmitted: Boolean(messageEmitted),
+    matchingTransferMessageEmitted: Boolean(messageEmitted),
     fundsDelivered: Boolean(step.fundsDelivered),
     deliveryStatus: step.deliveryStatus,
     childTransfer: step.childTransfer || null,
@@ -859,22 +875,35 @@ export async function reconcilePendingTransaction({
     return false;
   }
   if (step.completed && step.verified) {
-    if (step.childTransfer?.txHash && !step.childTransfer?.verified) {
+    // If delivery was not proven on the first run, retry child delivery lookup on restart
+    // even when no child hash was present on the first run.
+    if (
+      !step.fundsDelivered &&
+      (step.payoutWei || step.funderRefundWei || expectedEconomicsDelta === "PAYOUT" || expectedEconomicsDelta === "REFUND")
+    ) {
+      console.log(`  [🔍 RECOVERY] Step already completed/verified but fundsDelivered is unproven. Retrying child delivery lookup on restart...`);
       const parentTx = await client.getTransaction({ hash: step.txHash });
-      await verifyEmittedTransferOrChildTx({
-        client,
-        txInfo: parentTx,
-        step,
-        expectedTarget: step.recipient || step.funder,
-        amountWei: amountWei || step.payoutWei || step.funderRefundWei,
-        isPayout: Boolean(step.payoutWei),
-        saveEvidence,
-      });
+      if (parentTx) {
+        try {
+          await verifyEmittedTransferOrChildTx({
+            client,
+            txInfo: parentTx,
+            step,
+            expectedTarget: step.recipient || step.funder,
+            amountWei: amountWei || step.payoutWei || step.funderRefundWei,
+            isPayout: Boolean(step.payoutWei || expectedEconomicsDelta === "PAYOUT"),
+            saveEvidence,
+          });
+        } catch (err) {
+          console.warn(`  [⚠️ NOTICE] Child delivery lookup on restart: ${err.message || err}`);
+        }
+      }
     }
     return {
       txHash: step.txHash,
       completed: true,
       verified: true,
+      fundsDelivered: Boolean(step.fundsDelivered),
       early404Verified: Boolean(step.early404Verified),
       refundSettlementVerified: Boolean(step.refundSettlementVerified),
     };
@@ -964,6 +993,9 @@ export async function reconcilePendingTransaction({
       expectedType: "REFUND",
       amountWei,
     });
+
+    step.parentTransactionFinalized = true;
+    step.escrowStateEconomicsChanged = true;
 
     // Verify emitted transfer or child transaction for funder refund
     await verifyEmittedTransferOrChildTx({
@@ -1125,6 +1157,9 @@ export async function reconcilePendingTransaction({
     expectedType: expectedEconomicsDelta,
     amountWei,
   });
+
+  step.parentTransactionFinalized = true;
+  step.escrowStateEconomicsChanged = true;
 
   // Verify actual emitted transfer or child transaction for payouts and refunds BEFORE setting verified: true
   if (expectedEconomicsDelta === "PAYOUT" || afterEscrow.status === "RELEASED") {

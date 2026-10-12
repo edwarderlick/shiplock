@@ -203,23 +203,30 @@ To guarantee that rerun, timeout, or interruption never results in double-submis
    - **Temporary Registry Failure Separation**: If an in-window check produces a temporary registry failure, the harness verifies unchanged principal and economics, records the failure in attempt history, and does NOT mark the 404 proof verified.
 8. **Atomic Evidence Persistence**:
    - Uses `atomicWriteJson`: writes to a unique temporary file (`.tmp.<timestamp>.<rand>`) and calls `renameSync` to eliminate file truncation risks if interrupted.
-9. **Emitted Transfer & Child Transaction Verification (`verifyEmittedTransferOrChildTx`)**:
-   - Before setting `verified: true`, the runner verifies the actual emitted transfer or child transaction emitted by `_pay(recipient, amount)` in `contracts/shiplock.py`:
-     - Payouts verify emitted transfer/child transaction to `escrow.recipient` with exact amount `payoutWei`.
-     - Refunds verify emitted transfer/child transaction to `escrow.funder` with exact amount `refundWei`.
-   - **Fail-Closed on Absence**: The verifier fails closed and throws an error if neither a matching emitted message nor a verifiable child/transfer exists.
+9. **Explicit Separation of Evidence Facts & Emitted vs. Delivered Distinction (`verifyEmittedTransferOrChildTx`)**:
+   - Explicitly separates four distinct facts:
+     1. `parentTransactionFinalized`: receipt verified with `FINALIZED` and `FINISHED_WITH_RETURN`.
+     2. `escrowStateEconomicsChanged`: on-chain escrow state and economics deltas verified against baseline snapshot.
+     3. `matchingTransferMessageEmitted`: matching GenVM message found in `txInfo.messages` with exact recipient and amount.
+     4. `fundsDelivered`: true ONLY when a finalized child transaction receipt is proven on-chain.
+   - **Matching Message Never Proves Delivery**: A matching transfer message alone is never reported as delivered funds. If a finalized child transaction is unavailable, delivery is recorded as `MESSAGE_EMITTED_PENDING_DELIVERY` (`fundsDelivered: false`, `deliveryEvidence: null`).
    - **No Field Substitution**: Never substitutes expected recipient or amount for missing transaction fields; both recipient and value must be explicitly present on the child transaction or message object.
-   - **SDK Triggered Lookup**: Queries `client.getTriggeredTransactionIds({ hash })` when the parent transaction response lacks child IDs in `triggered_transactions`.
-   - **Emitted vs. Delivered Distinction**: Distinguishes "message emitted" (`messageEmitted: true`, `deliveryStatus: "MESSAGE_EMITTED_PENDING_DELIVERY"`) from "funds delivered" (`fundsDelivered: true`, `deliveryStatus: "DELIVERED"`). Funds are never marked delivered without supporting on-chain evidence (a confirmed child transaction with `statusName: "FINALIZED"` and `txExecutionResultName: "FINISHED_WITH_RETURN"` / `"SUCCESS"`).
-10. **Pending Child Transfer Restart Reconciliation**:
-    - If restart occurs while a parent transaction is finalized but a triggered child transfer was recorded as pending (`status: "PENDING"`), the harness reconciles the child transfer on restart, awaits finalization, asserts recipient and value, and only then marks verification complete.
-11. **Studio Next RPC Time Gate Checking (`getRpcTime`)**:
-    - Runners query `eth_getBlockByNumber("latest")` to determine the current on-chain block timestamp directly from the Studio Next RPC.
-    - If the RPC timestamp query fails or is unsupported in mock environments, the runner logs a notice, falls back to local UTC, and relies on the smart contract's canonical execution-time gate (`now_dt() >= window_start_dt`).
-12. **Stage-Aware Preflight Economics Reconciliation (`scripts/preflight_studio_check.mjs`)**:
-    - Preflight dynamically validates all 6 escrows across valid lifecycle states (`OPEN`, `RELEASED`, `REFUND_NOHIT`, `CANCELED`, `EXPIRED`).
-    - **Contract Alignment**: Accurately reflects deployed contract behavior: `cancel` and `expire` update status and refund on-chain, but preserve the initial `match_reason` (they do not overwrite `match_reason` with status names).
-    - **Accurate Refund Counting**: Both `CANCELED` and `EXPIRED` refunds correctly increment `dynamicExpectedRefunded` and reconcile with contract totals. Legitimate funder cancels or settlements pass verification without false snapshot failures.
+   - **Fail-Closed on Absence**: Throws an error if neither a matching emitted message nor a verifiable child/transfer exists.
+10. **Delivery Lookup Retry on Restart Reconciliation**:
+    - On restart reconciliation, the harness retries delivery lookup via SDK `getTriggeredTransactionIds` and parent `triggered_transactions` even when no child hash was present on the first run.
+    - If a child transaction is discovered and finalized, delivery evidence is upgraded to `DELIVERED` (`fundsDelivered: true`) without resubmitting or modifying the finalized parent transaction.
+11. **Truthful Settlement Reporting for Already-Settled Escrows**:
+    - In `scripts/settle_404_escrows.mjs`, removes any path that sets `refundSettlementVerified = true` solely because `get_escrow` returns `REFUND_NOHIT`.
+    - An already settled escrow must not receive a fabricated transaction proof or default match reason/amount.
+    - If its actual transaction and economics cannot be reconstructed, reports `SETTLED_ON_CHAIN_PROOF_INCOMPLETE` (`proofIncomplete: true`, `refundSettlementVerified: false`) and submits no duplicate write.
+    - The same truthful reporting rule applies to already `RELEASED` candidate escrows in `scripts/release_candidate_escrows.mjs`.
+12. **Fail-Closed Studio Next RPC Block Time Checking (`getRpcTime`)**:
+    - Runners recheck RPC block timestamp via `eth_getBlockByNumber("latest")` immediately before evaluating time gates and immediately before each timed write (`failClosed: true`).
+    - If the RPC timestamp cannot be obtained, timed writes fail closed rather than silently falling back to local clock time.
+13. **Full On-Chain Economics Reconciliation Over All Escrows (`scripts/preflight_studio_check.mjs`)**:
+    - Queries `get_escrow_ids()` from the contract and reconciles economics against every on-chain escrow returned by the contract (currently 7 escrows).
+    - Separately validates each steward evidence escrow from `ESCROWS_TO_CHECK` (ID presence, principal, stage-aware lifecycle status, and Mode 1 allocation construction/authoritative fee estimation).
+    - Unrelated or new public-app escrows do not cause false preflight failures.
 
 ---
 
@@ -308,9 +315,10 @@ Registry credentials must never be passed in command arguments, chat, logs, or c
 | `python -m pytest tests/direct -q` | Direct contract unit tests | **35 passed** |
 | `python -m pytest tests/test_deployer_keystore.py -v` | Keystore & address preservation | **13 passed** |
 | `python -m pytest` | **Combined Python test suite** | **48 passed** |
-| `node --test tests/test_evidence_harness.mjs` | PyPI urls parsing, candidate release, baseline snapshots, recovery, strict early 404, temporary failure retry lifecycle, refund settlement, Mode 1 transfer fee allocation trees, cross-boundary reconciliation, emitted transfers & child transactions, SDK triggered lookup, message vs delivered distinction, Studio Next RPC time gate | **47 passed** (9 suites) |
-| `npm --prefix web test` | Frontend flow & contract runtime tests (phase timeout bounds, Mode 1 transfer fee allocation trees, two-recipient release allocation path, cross-boundary release safety, ActionModal polling) | **69 passed** |
-| `node scripts/preflight_studio_check.mjs` | Read-only preflight on Studio Next: stage-aware contract economics, 6 escrows (including manual 2 GEN escrow), allocation construction & authoritative fee estimation | **All 6 escrows verified (Read-only)** |
-| `npm --prefix web run lint` | ESLint static analysis | **0 errors** |
+| `node --test tests/test_evidence_harness.mjs` | PyPI urls parsing, candidate release, baseline snapshots, recovery, strict early 404, temporary failure retry lifecycle, refund settlement, Mode 1 transfer fee allocation trees, cross-boundary reconciliation, emitted transfers & child transactions, SDK triggered lookup, explicit fact separation (message vs delivered), restart delivery lookup, fail-closed RPC time, truthful reporting on already-settled state, all on-chain escrows economics reconciliation | **55 passed** (10 suites) |
+| `npm --prefix web test` | Frontend flow & contract runtime tests (phase timeout bounds, Mode 1 transfer fee allocation trees, two-recipient release allocation path, cross-boundary release safety, ActionModal polling) | **69 passed** (15 suites) |
+| `node scripts/preflight_studio_check.mjs` | Read-only live preflight on Studio Next: contract economics reconciled across all 7 on-chain escrows; all 6 steward escrows validated (allocation builds & authoritative fee estimations verified) | **All 7 on-chain escrows reconciled & all 6 steward escrows verified (Read-only)** |
+| `npm --prefix web run lint` | ESLint static analysis | **0 errors** (18 warnings) |
 | `npm --prefix web run build` | Next.js production build | **Compiled successfully** |
+| `python scripts/audit_secrets.py` | Secret audit (active commit tree) | **0 plaintext keys, 0 passwords, 0 secrets** |
 | `https://shiplock-chi.vercel.app/` | Live Vercel production deployment (`dpl_F5RHC4RAd9c1MHXfsspfiLxJ1eGm`) | **Verified live (HTTP 200)** |

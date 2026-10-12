@@ -215,23 +215,35 @@ async function main() {
     const regCheck = await queryRegistryMetadata(item.template, item.package, item.version);
     console.log(`      Registry Check: ${regCheck.summary} (HTTP ${regCheck.statusCode})`);
     record.latestRegistryCheck = {
-      timestampUtc: now.toISOString(),
+      timestampUtc: new Date().toISOString(),
       ...regCheck,
     };
     saveEvidence();
 
-    if (record.refundSettlementVerified || escrow.status === "REFUND_NOHIT" || record.postWindowSettlement?.verified) {
-      console.log(`  [✓] Escrow already fully settled as REFUND_NOHIT. No submission needed.`);
-      record.refundSettlementVerified = true;
+    if (escrow.status === "REFUND_NOHIT") {
+      if (record.refundSettlementVerified || record.postWindowSettlement?.verified) {
+        console.log(`  [✓] Escrow already fully settled as REFUND_NOHIT with verified transaction proof.`);
+        continue;
+      }
+      console.log(`  [⚠️ NOTICE] Escrow ${item.id} is already settled as REFUND_NOHIT on-chain, but transaction proof is incomplete.`);
+      record.refundSettlementVerified = false;
+      record.settledOnChainProofIncomplete = true;
+      record.currentStatus = "SETTLED_ON_CHAIN_PROOF_INCOMPLETE";
       record.finalState = {
         status: "REFUND_NOHIT",
         settled: true,
-        matchReason: escrow.match_reason || record.postWindowSettlement?.resultingMatchReason || "WINDOW_EXPIRED_NO_RELEASE",
-        funderRefundWei: (escrow.refund || record.principalWei).toString(),
+        matchReason: escrow.match_reason || null,
+        funderRefundWei: escrow.refund !== undefined ? escrow.refund.toString() : null,
+        proofIncomplete: true,
+        finding: "settled on-chain, proof incomplete",
       };
       saveEvidence();
       continue;
     }
+
+    // Recheck RPC block time immediately before evaluating time gates and timed writes (failClosed: true)
+    const now = await getRpcTime(readClient, { failClosed: true });
+    console.log(`  [⏰ TIME GATE] Current RPC block timestamp for ${item.name}: ${now.toISOString()}`);
 
     // 3. TIME GATE: PRE-WINDOW CHECK
     if (now < windowStart) {
@@ -256,6 +268,12 @@ async function main() {
       if (record.inWindowAttempt?.txHash && !record.inWindowAttempt?.completed) {
         console.log(`  [⚠️ PENDING] In-window check ${record.inWindowAttempt.txHash} is still pending. Never overwriting or resubmitting.`);
         continue;
+      }
+
+      // Recheck RPC block time immediately before timed write (fail closed)
+      const writeNow = await getRpcTime(readClient, { failClosed: true });
+      if (writeNow < windowStart) {
+        throw new Error(`RPC block timestamp ${writeNow.toISOString()} is before window_start ${windowStart.toISOString()}. Aborting write.`);
       }
 
       console.log(`  [*] Executing in-window release attempt with fail-closed checks & baseline snapshots...`);
@@ -312,9 +330,17 @@ async function main() {
     // 5. POST-WINDOW SETTLEMENT: now >= windowEnd
     if (now >= windowEnd) {
       console.log(`  [🏁 POST-WINDOW] Deadline reached. Checking settlement state...`);
-      if (record.refundSettlementVerified || record.postWindowSettlement?.verified || escrow.status === "REFUND_NOHIT") {
+      if (record.refundSettlementVerified || record.postWindowSettlement?.verified) {
         console.log(`  [✓] Post-window settlement already verified (Tx: ${record.postWindowSettlement?.txHash || "on-chain"}). No further write.`);
         continue;
+      }
+
+      // Recheck RPC block time immediately before post-window write (fail closed)
+      const writeNow = await getRpcTime(readClient, { failClosed: true });
+      if (writeNow < windowEnd) {
+        throw new Error(
+          `RPC block timestamp ${writeNow.toISOString()} is before window_end ${windowEnd.toISOString()}. REFUND_NOHIT allowed only at or after window_end. Aborting write.`
+        );
       }
 
       const caller = await getCallerAccount();
