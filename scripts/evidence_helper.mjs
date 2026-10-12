@@ -591,11 +591,25 @@ export async function verifyEmittedTransferOrChildTx({
   saveEvidence = () => {},
 }) {
   const targetLower = String(expectedTarget || "").toLowerCase();
-  const amtExpected = BigInt(amountWei ?? 0);
+  if (!targetLower) {
+    throw new Error("expectedTarget is required for transfer verification");
+  }
+  if (amountWei === undefined || amountWei === null) {
+    throw new Error("amountWei is required for transfer verification");
+  }
+  const amtExpected = BigInt(amountWei);
+  if (amtExpected <= 0n) {
+    throw new Error(`amountWei must be > 0 for transfer verification, got ${amtExpected}`);
+  }
   const transferType = isPayout ? "PAYOUT_TO_RECIPIENT" : "REFUND_TO_FUNDER";
 
+  let messageEmitted = false;
+  let childTxVerified = false;
+  let verifiedChildTx = null;
+  let verifiedChildHash = null;
+
   // 1. Reconcile previously recorded pending child transfer if present (e.g. on restart)
-  if (step.childTransfer?.txHash && !step.childTransfer?.verified) {
+  if (step?.childTransfer?.txHash && !step.childTransfer?.verified) {
     console.log(`  [🔍 RECOVERY] Reconciling pending child transfer: ${step.childTransfer.txHash}`);
     let childTx = await client.getTransaction({ hash: step.childTransfer.txHash });
     if (!childTx) {
@@ -621,25 +635,64 @@ export async function verifyEmittedTransferOrChildTx({
         `Child transfer ${step.childTransfer.txHash} execution failed: status=${childTx.statusName}, result=${childTx.txExecutionResultName}`
       );
     }
-    const childTo = String(childTx.to_address || childTx.to || childTx.recipient || "").toLowerCase();
-    if (childTo && childTo !== targetLower) {
+    const childToRaw = childTx.to_address ?? childTx.to ?? childTx.recipient;
+    if (!childToRaw) {
+      step.childTransfer.failed = true;
+      saveEvidence();
+      throw new Error(`Child transfer ${step.childTransfer.txHash} missing recipient field`);
+    }
+    const childTo = String(childToRaw).toLowerCase();
+    if (childTo !== targetLower) {
+      step.childTransfer.failed = true;
+      saveEvidence();
       throw new Error(`Child transfer recipient mismatch: expected ${targetLower}, got ${childTo}`);
     }
-    const childVal = BigInt(childTx.value ?? amtExpected);
+    if (childTx.value === undefined || childTx.value === null) {
+      step.childTransfer.failed = true;
+      saveEvidence();
+      throw new Error(`Child transfer ${step.childTransfer.txHash} missing value field`);
+    }
+    const childVal = BigInt(childTx.value);
     if (childVal !== amtExpected) {
+      step.childTransfer.failed = true;
+      saveEvidence();
       throw new Error(`Child transfer value mismatch: expected ${amtExpected}, got ${childVal}`);
     }
     step.childTransfer.status = childTx.statusName;
     step.childTransfer.executionResult = childTx.txExecutionResultName;
+    step.childTransfer.recipient = childTo;
+    step.childTransfer.amountWei = childVal.toString();
     step.childTransfer.verified = true;
     step.childTransfer.finalizedAtUtc = new Date().toISOString();
+    childTxVerified = true;
+    verifiedChildTx = childTx;
+    verifiedChildHash = step.childTransfer.txHash;
   }
 
-  // 2. If txInfo exposes triggered_transactions (child transactions), verify each or primary
+  // 2. Collect candidate child transaction IDs from txInfo or via SDK triggered-transaction lookup
+  const candidateChildHashes = [];
   if (Array.isArray(txInfo?.triggered_transactions) && txInfo.triggered_transactions.length > 0) {
-    console.log(`  [*] Inspecting ${txInfo.triggered_transactions.length} child transaction(s)...`);
-    for (const childHash of txInfo.triggered_transactions) {
-      if (!step.childTransfer) {
+    candidateChildHashes.push(...txInfo.triggered_transactions);
+  } else if (typeof client?.getTriggeredTransactionIds === "function") {
+    const parentHash = txInfo?.hash || step?.txHash;
+    if (parentHash) {
+      try {
+        console.log(`  [*] Querying client.getTriggeredTransactionIds for parent ${parentHash}...`);
+        const triggered = await client.getTriggeredTransactionIds({ hash: parentHash });
+        if (Array.isArray(triggered) && triggered.length > 0) {
+          candidateChildHashes.push(...triggered);
+        }
+      } catch (err) {
+        console.warn(`  [⚠️ NOTICE] client.getTriggeredTransactionIds query failed: ${err.message || err}`);
+      }
+    }
+  }
+
+  // Inspect any candidate child transactions
+  if (candidateChildHashes.length > 0) {
+    console.log(`  [*] Inspecting ${candidateChildHashes.length} child transaction(s)...`);
+    for (const childHash of candidateChildHashes) {
+      if (!step.childTransfer || step.childTransfer.txHash !== childHash) {
         step.childTransfer = {
           txHash: childHash,
           status: "PENDING",
@@ -671,55 +724,112 @@ export async function verifyEmittedTransferOrChildTx({
           `Child transaction ${childHash} execution failed: status=${childTx.statusName}, result=${childTx.txExecutionResultName}`
         );
       }
-      const childTo = String(childTx.to_address || childTx.to || childTx.recipient || "").toLowerCase();
-      if (childTo && childTo !== targetLower) {
+      const childToRaw = childTx.to_address ?? childTx.to ?? childTx.recipient;
+      if (!childToRaw) {
+        step.childTransfer.failed = true;
+        saveEvidence();
+        throw new Error(`Child transaction ${childHash} missing recipient field`);
+      }
+      const childTo = String(childToRaw).toLowerCase();
+      if (childTo !== targetLower) {
+        step.childTransfer.failed = true;
+        saveEvidence();
         throw new Error(`Child transaction recipient mismatch: expected ${targetLower}, got ${childTo}`);
       }
-      const childVal = BigInt(childTx.value ?? amtExpected);
+      if (childTx.value === undefined || childTx.value === null) {
+        step.childTransfer.failed = true;
+        saveEvidence();
+        throw new Error(`Child transaction ${childHash} missing value field`);
+      }
+      const childVal = BigInt(childTx.value);
       if (childVal !== amtExpected) {
+        step.childTransfer.failed = true;
+        saveEvidence();
         throw new Error(`Child transaction amount mismatch: expected ${amtExpected}, got ${childVal}`);
       }
       step.childTransfer.status = childTx.statusName;
       step.childTransfer.executionResult = childTx.txExecutionResultName;
+      step.childTransfer.recipient = childTo;
+      step.childTransfer.amountWei = childVal.toString();
       step.childTransfer.verified = true;
       step.childTransfer.finalizedAtUtc = new Date().toISOString();
+      childTxVerified = true;
+      verifiedChildTx = childTx;
+      verifiedChildHash = childHash;
     }
   }
 
-  // 3. If txInfo exposes messages, verify emitted GenVM message matches expected recipient
+  // 3. Inspect emitted messages in txInfo.messages
   if (Array.isArray(txInfo?.messages) && txInfo.messages.length > 0) {
     console.log(`  [*] Inspecting ${txInfo.messages.length} emitted GenVM message(s)...`);
     const matchingMsg = txInfo.messages.find((m) => {
-      const dest = String(m.recipient || m.to || m.target || "").toLowerCase();
-      return dest === targetLower;
+      const dest = m.recipient ?? m.to ?? m.target;
+      if (!dest) return false;
+      return String(dest).toLowerCase() === targetLower;
     });
-    if (!matchingMsg) {
-      throw new Error(`Emitted GenVM messages did not include expected recipient ${targetLower}`);
+
+    if (matchingMsg) {
+      const msgValRaw = matchingMsg.value !== undefined ? matchingMsg.value : matchingMsg.amount;
+      if (msgValRaw === undefined || msgValRaw === null) {
+        throw new Error(`Emitted message matching recipient ${targetLower} is missing value field`);
+      }
+      const msgVal = BigInt(msgValRaw);
+      if (msgVal !== amtExpected) {
+        throw new Error(`Emitted message value mismatch: expected ${amtExpected}, got ${msgVal}`);
+      }
+      messageEmitted = true;
+      step.emittedMessage = {
+        recipient: targetLower,
+        amountWei: amtExpected.toString(),
+        messageType: matchingMsg.messageType ?? 0,
+        verified: true,
+      };
+      step.messageEmitted = true;
     }
-    const msgVal = BigInt(matchingMsg.value ?? matchingMsg.amount ?? amtExpected);
-    if (msgVal !== amtExpected) {
-      throw new Error(`Emitted message value mismatch: expected ${amtExpected}, got ${msgVal}`);
-    }
-    step.emittedMessage = {
-      recipient: targetLower,
-      amountWei: amtExpected.toString(),
-      messageType: matchingMsg.messageType ?? 0,
-      verified: true,
-    };
   }
 
-  // 4. Record comprehensive transfer evidence
+  // 4. Must fail when NEITHER a matching emitted message nor a verifiable child/transfer exists
+  if (!messageEmitted && !childTxVerified) {
+    throw new Error(
+      `Transfer verification failed for ${transferType}: neither a matching emitted message nor a verifiable child/transfer exists for ${amtExpected} wei to ${targetLower}`
+    );
+  }
+
+  // 5. Distinguish "message emitted" from "funds delivered"
+  // Do NOT mark delivered without supporting on-chain evidence (childTxVerified).
+  if (childTxVerified) {
+    step.fundsDelivered = true;
+    step.deliveryStatus = "DELIVERED";
+    step.deliveryEvidence = {
+      childTxHash: verifiedChildHash,
+      status: verifiedChildTx?.statusName || "FINALIZED",
+      executionResult: verifiedChildTx?.txExecutionResultName || "FINISHED_WITH_RETURN",
+      confirmedAtUtc: new Date().toISOString(),
+    };
+  } else {
+    step.fundsDelivered = false;
+    step.deliveryStatus = "MESSAGE_EMITTED_PENDING_DELIVERY";
+    step.deliveryEvidence = null;
+  }
+
+  // 6. Record comprehensive transfer evidence
   step.transferEvidence = {
     verified: true,
     type: transferType,
     targetAddress: targetLower,
     amountWei: amtExpected.toString(),
+    messageEmitted: Boolean(messageEmitted),
+    fundsDelivered: Boolean(step.fundsDelivered),
+    deliveryStatus: step.deliveryStatus,
     childTransfer: step.childTransfer || null,
     emittedMessage: step.emittedMessage || null,
+    deliveryEvidence: step.deliveryEvidence || null,
     verifiedAtUtc: new Date().toISOString(),
   };
 
-  console.log(`  [✓] Verified emitted transfer / child transaction for ${transferType}: ${amtExpected} wei -> ${targetLower}`);
+  console.log(
+    `  [✓] Verified emitted transfer for ${transferType}: ${amtExpected} wei -> ${targetLower} (messageEmitted=${messageEmitted}, fundsDelivered=${step.fundsDelivered})`
+  );
   return true;
 }
 

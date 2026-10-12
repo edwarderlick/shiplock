@@ -539,6 +539,13 @@ describe("ShipLock Steward Evidence Harness Tests", () => {
         getTransaction: async () => ({
           statusName: "FINALIZED",
           txExecutionResultName: "FINISHED_WITH_RETURN",
+          messages: [
+            {
+              recipient: "0xrecipient",
+              value: "10000000000000000",
+              messageType: 1,
+            },
+          ],
         }),
         readContract: async ({ functionName }) => {
           if (functionName === "get_escrow") {
@@ -821,10 +828,18 @@ describe("ShipLock Steward Evidence Harness Tests", () => {
       // The runner must reconcile that outcome safely as final settlement evidence, NOT count it as early 404 proof, and NOT submit another settlement.
       let duplicateSettlementSubmitted = false;
 
+      const funderAddr = "0x20e850baad26d763d4f691780d1beba01c8d6084";
       const mockClient = {
         getTransaction: async () => ({
           statusName: "FINALIZED",
           txExecutionResultName: "FINISHED_WITH_RETURN",
+          messages: [
+            {
+              recipient: funderAddr,
+              value: "20000000000000000",
+              messageType: 1,
+            },
+          ],
         }),
         readContract: async ({ functionName }) => {
           if (functionName === "get_escrow") {
@@ -834,6 +849,7 @@ describe("ShipLock Steward Evidence Harness Tests", () => {
               amount: 20000000000000000n,
               payout: 0n,
               refund: 20000000000000000n,
+              funder: funderAddr,
             };
           }
           if (functionName === "get_economics") {
@@ -1116,6 +1132,13 @@ describe("ShipLock Steward Evidence Harness Tests", () => {
             return {
               statusName: "FINALIZED",
               txExecutionResultName: "FINISHED_WITH_RETURN",
+              messages: [
+                {
+                  recipient: "0xfunder_addr",
+                  value: "20000000000000000",
+                  messageType: 1,
+                },
+              ],
             };
           }
         },
@@ -1129,6 +1152,7 @@ describe("ShipLock Steward Evidence Harness Tests", () => {
                 amount: 20000000000000000n,
                 payout: 0n,
                 refund: 0n,
+                funder: "0xfunder_addr",
               };
             }
             // After postWindowSettlement: REFUND_NOHIT
@@ -1138,6 +1162,7 @@ describe("ShipLock Steward Evidence Harness Tests", () => {
               amount: 20000000000000000n,
               payout: 0n,
               refund: 20000000000000000n,
+              funder: "0xfunder_addr",
             };
           }
           if (functionName === "get_economics") {
@@ -1521,6 +1546,13 @@ describe("ShipLock Steward Evidence Harness Tests", () => {
           return {
             statusName: "FINALIZED",
             txExecutionResultName: "FINISHED_WITH_RETURN",
+            messages: [
+              {
+                recipient: funder,
+                value: "20000000000000000",
+                messageType: 1,
+              },
+            ],
           };
         },
         readContract: async ({ functionName }) => {
@@ -1827,6 +1859,186 @@ describe("ShipLock Steward Evidence Harness Tests", () => {
       }, /execution failed/);
 
       assert.equal(step.childTransfer?.failed, true);
+    });
+
+    it("verifyEmittedTransferOrChildTx fails closed when both messages and triggered_transactions/children are empty", async () => {
+      const mockClient = {
+        getTransaction: async () => null,
+      };
+
+      const step = {};
+      const txInfo = {
+        messages: [],
+        triggered_transactions: [],
+      };
+
+      await assert.rejects(async () => {
+        await verifyEmittedTransferOrChildTx({
+          client: mockClient,
+          txInfo,
+          step,
+          expectedTarget: "0xrecipient_addr",
+          amountWei: "10000000000000000",
+          isPayout: true,
+        });
+      }, /neither a matching emitted message nor a verifiable child\/transfer exists/);
+
+      assert.notEqual(step.transferEvidence?.verified, true);
+    });
+
+    it("verifyEmittedTransferOrChildTx fails closed when child transaction is missing recipient field", async () => {
+      const mockClient = {
+        getTransaction: async ({ hash }) => ({
+          hash,
+          statusName: "FINALIZED",
+          txExecutionResultName: "FINISHED_WITH_RETURN",
+          value: "10000000000000000",
+        }),
+      };
+
+      const step = {};
+      const txInfo = {
+        triggered_transactions: ["0xchild_no_recipient"],
+      };
+
+      await assert.rejects(async () => {
+        await verifyEmittedTransferOrChildTx({
+          client: mockClient,
+          txInfo,
+          step,
+          expectedTarget: "0xrecipient_addr",
+          amountWei: "10000000000000000",
+          isPayout: true,
+        });
+      }, /missing recipient field/);
+
+      assert.equal(step.childTransfer?.failed, true);
+    });
+
+    it("verifyEmittedTransferOrChildTx fails closed when child transaction is missing value field", async () => {
+      const mockClient = {
+        getTransaction: async ({ hash }) => ({
+          hash,
+          statusName: "FINALIZED",
+          txExecutionResultName: "FINISHED_WITH_RETURN",
+          to_address: "0xrecipient_addr",
+        }),
+      };
+
+      const step = {};
+      const txInfo = {
+        triggered_transactions: ["0xchild_no_value"],
+      };
+
+      await assert.rejects(async () => {
+        await verifyEmittedTransferOrChildTx({
+          client: mockClient,
+          txInfo,
+          step,
+          expectedTarget: "0xrecipient_addr",
+          amountWei: "10000000000000000",
+          isPayout: true,
+        });
+      }, /missing value field/);
+
+      assert.equal(step.childTransfer?.failed, true);
+    });
+
+    it("verifyEmittedTransferOrChildTx fails closed when emitted message is missing value field", async () => {
+      const mockClient = {};
+      const step = {};
+      const txInfo = {
+        messages: [{ recipient: "0xrecipient_addr" }],
+      };
+
+      await assert.rejects(async () => {
+        await verifyEmittedTransferOrChildTx({
+          client: mockClient,
+          txInfo,
+          step,
+          expectedTarget: "0xrecipient_addr",
+          amountWei: "10000000000000000",
+          isPayout: true,
+        });
+      }, /missing value field/);
+    });
+
+    it("verifyEmittedTransferOrChildTx uses SDK getTriggeredTransactionIds when parent response lacks child IDs", async () => {
+      let sdkLookupCalled = false;
+      const mockClient = {
+        getTriggeredTransactionIds: async ({ hash }) => {
+          if (hash === "0xparent_without_children") {
+            sdkLookupCalled = true;
+            return ["0xsdk_child_tx"];
+          }
+          return [];
+        },
+        getTransaction: async ({ hash }) => {
+          if (hash === "0xsdk_child_tx") {
+            return {
+              hash: "0xsdk_child_tx",
+              statusName: "FINALIZED",
+              txExecutionResultName: "FINISHED_WITH_RETURN",
+              to_address: "0xrecipient_addr",
+              value: "10000000000000000",
+            };
+          }
+          throw new Error("unexpected hash");
+        },
+      };
+
+      const step = {};
+      const txInfo = {
+        hash: "0xparent_without_children",
+      };
+
+      const result = await verifyEmittedTransferOrChildTx({
+        client: mockClient,
+        txInfo,
+        step,
+        expectedTarget: "0xrecipient_addr",
+        amountWei: "10000000000000000",
+        isPayout: true,
+      });
+
+      assert.equal(result, true);
+      assert.equal(sdkLookupCalled, true, "Must have called SDK getTriggeredTransactionIds");
+      assert.equal(step.childTransfer?.txHash, "0xsdk_child_tx");
+      assert.equal(step.childTransfer?.verified, true);
+      assert.equal(step.fundsDelivered, true);
+      assert.equal(step.deliveryStatus, "DELIVERED");
+    });
+
+    it("verifyEmittedTransferOrChildTx distinguishes message emitted from funds delivered", async () => {
+      const mockClient = {};
+      const step = {};
+      const txInfo = {
+        hash: "0xparent_tx",
+        messages: [
+          {
+            recipient: "0xrecipient_addr",
+            value: "10000000000000000",
+            messageType: 1,
+          },
+        ],
+      };
+
+      const result = await verifyEmittedTransferOrChildTx({
+        client: mockClient,
+        txInfo,
+        step,
+        expectedTarget: "0xrecipient_addr",
+        amountWei: "10000000000000000",
+        isPayout: true,
+      });
+
+      assert.equal(result, true);
+      assert.equal(step.messageEmitted, true);
+      assert.equal(step.fundsDelivered, false, "Must not mark delivered without on-chain child transaction evidence");
+      assert.equal(step.deliveryStatus, "MESSAGE_EMITTED_PENDING_DELIVERY");
+      assert.equal(step.transferEvidence?.verified, true);
+      assert.equal(step.transferEvidence?.fundsDelivered, false);
+      assert.equal(step.transferEvidence?.messageEmitted, true);
     });
 
     it("reconcilePendingTransaction reconciles pending child transfer on restart before setting verified: true", async () => {

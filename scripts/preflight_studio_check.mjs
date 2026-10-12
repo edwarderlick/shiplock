@@ -107,22 +107,33 @@ async function main() {
       console.log(`  ✓ Verified legitimate terminal RELEASED settlement state (payout: ${payoutWei} wei)`);
     } else if (esc.status === "REFUND_NOHIT") {
       dynamicExpectedRefunded += principalWei;
-      if (esc.match_reason !== "WINDOW_EXPIRED_NO_RELEASE") {
-        throw new Error(`Escrow ${item.name} is REFUND_NOHIT but match_reason is '${esc.match_reason}' (expected WINDOW_EXPIRED_NO_RELEASE)`);
-      }
       if (refundWei !== principalWei) {
         throw new Error(`Escrow ${item.name} is REFUND_NOHIT but refund (${refundWei}) does not match principal (${principalWei})`);
       }
-      console.log(`  ✓ Verified legitimate terminal REFUND_NOHIT settlement state (refund: ${refundWei} wei)`);
+      if (payoutWei !== 0n) {
+        throw new Error(`Escrow ${item.name} is REFUND_NOHIT but payout (${payoutWei}) is non-zero`);
+      }
+      console.log(`  ✓ Verified legitimate terminal REFUND_NOHIT settlement state (refund: ${refundWei} wei, match_reason: ${esc.match_reason})`);
     } else if (esc.status === "CANCELED") {
       dynamicExpectedRefunded += principalWei;
-      if (esc.match_reason !== "CANCELED") {
-        throw new Error(`Escrow ${item.name} is CANCELED but match_reason is '${esc.match_reason}' (expected CANCELED)`);
-      }
+      // In contracts/shiplock.py:cancel, status and refund are updated, but match_reason is not overwritten
       if (refundWei !== principalWei) {
         throw new Error(`Escrow ${item.name} is CANCELED but refund (${refundWei}) does not match principal (${principalWei})`);
       }
-      console.log(`  ✓ Verified legitimate terminal CANCELED settlement state (refund: ${refundWei} wei)`);
+      if (payoutWei !== 0n) {
+        throw new Error(`Escrow ${item.name} is CANCELED but payout (${payoutWei}) is non-zero`);
+      }
+      console.log(`  ✓ Verified legitimate terminal CANCELED settlement state (refund: ${refundWei} wei, match_reason preserved: ${esc.match_reason})`);
+    } else if (esc.status === "EXPIRED") {
+      dynamicExpectedRefunded += principalWei;
+      // In contracts/shiplock.py:expire, status and refund are updated, but match_reason is not overwritten
+      if (refundWei !== principalWei) {
+        throw new Error(`Escrow ${item.name} is EXPIRED but refund (${refundWei}) does not match principal (${principalWei})`);
+      }
+      if (payoutWei !== 0n) {
+        throw new Error(`Escrow ${item.name} is EXPIRED but payout (${payoutWei}) is non-zero`);
+      }
+      console.log(`  ✓ Verified legitimate terminal EXPIRED settlement state (refund: ${refundWei} wei, match_reason preserved: ${esc.match_reason})`);
     }
 
     // 3. Test allocation construction and authoritative fee estimation for OPEN escrows
