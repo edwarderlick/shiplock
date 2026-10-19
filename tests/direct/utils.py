@@ -67,6 +67,14 @@ def mock_registry(vm, target, status=200):
         vm.clear_mocks()
         if isinstance(target, str):
             vm.mock_web(r".*", {"status": status, "body": target})
+        elif isinstance(target, dict):
+            for pat, val in target.items():
+                if isinstance(val, tuple):
+                    vm.mock_web(pat, {"status": val[1], "body": val[0]})
+                elif isinstance(val, dict):
+                    vm.mock_web(pat, {"status": val.get("status", 200), "body": val.get("body", "")})
+                else:
+                    vm.mock_web(pat, {"status": 200, "body": str(val)})
 
     # Patch loaded contract's genlayer module
     for mod_name, mod in list(sys.modules.items()):

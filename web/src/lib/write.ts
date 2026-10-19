@@ -605,6 +605,9 @@ export interface VerifyCreatedEscrowOptions {
   version: string;
   amountWei: bigint | string;
   nonce: bigint | string;
+  policy?: string;
+  expectedRepo?: string;
+  expectedTag?: string;
   maxAttempts?: number;
   intervalMs?: number;
 }
@@ -612,7 +615,7 @@ export interface VerifyCreatedEscrowOptions {
 /**
  * Validates lock submission candidate ID and verifies on-chain get_escrow before navigating.
  * Accepts returnedId only if valid 0x + 64-hex equal to expected derived ID; otherwise reports mismatch.
- * Confirms exact ID, funder, recipient, template, package, version, amount, and nonce (not status OPEN alone).
+ * Confirms exact ID, funder, recipient, template, package, version, amount, nonce, and policy metadata.
  */
 export async function verifyCreatedEscrow({
   client,
@@ -626,6 +629,9 @@ export async function verifyCreatedEscrow({
   version,
   amountWei,
   nonce,
+  policy,
+  expectedRepo,
+  expectedTag,
   maxAttempts = 10,
   intervalMs = 1000,
 }: VerifyCreatedEscrowOptions) {
@@ -665,6 +671,9 @@ export async function verifyCreatedEscrow({
         const verMatches = String(e.version || "").trim() === version.trim();
         const amountMatches = BigInt(e.amount ?? 0) === expectedAmount;
         const nonceMatches = BigInt(e.nonce ?? 0) === expectedNonce;
+        const policyMatches = !policy || String(e.policy || "REGISTRY_ONLY") === policy;
+        const repoMatches = !expectedRepo || String(e.expected_repo || "").toLowerCase() === expectedRepo.trim().toLowerCase();
+        const tagMatches = !expectedTag || String(e.expected_tag || "").trim() === expectedTag.trim();
 
         if (
           idMatches &&
@@ -675,7 +684,10 @@ export async function verifyCreatedEscrow({
           pkgMatches &&
           verMatches &&
           amountMatches &&
-          nonceMatches
+          nonceMatches &&
+          policyMatches &&
+          repoMatches &&
+          tagMatches
         ) {
           verifiedEscrow = e;
           break;

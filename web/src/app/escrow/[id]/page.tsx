@@ -41,12 +41,23 @@ export default function EscrowDetail() {
         functionName: "get_escrow",
         args: [escrowId]
       }) as any;
+      const parseJsonSafe = (raw: any) => {
+        if (!raw || typeof raw !== "string") return null;
+        try {
+          return JSON.parse(raw);
+        } catch {
+          return null;
+        }
+      };
+
       setEscrow({
         ...e,
         amountBig: BigInt(e.amount),
         start: new Date(e.window_start_utc).getTime(),
         windowEnd: new Date(e.window_end_utc).getTime(),
-        expire: new Date(e.expire_at_utc).getTime()
+        expire: new Date(e.expire_at_utc).getTime(),
+        parsedRegistryEvidence: parseJsonSafe(e.registry_evidence),
+        parsedGithubEvidence: parseJsonSafe(e.github_evidence),
       });
     } catch(err: any) {
       console.error(err);
@@ -102,6 +113,7 @@ export default function EscrowDetail() {
   const canRelease = isOpen && now >= escrow.start && now < escrow.expire && !isFunder;
   const canExpire = isOpen && now >= escrow.expire;
   const isRetryableOpen = isOpen && typeof escrow.match_reason === "string" && escrow.match_reason.includes("RETRYABLE");
+  const isSourceLinked = escrow.policy === "SOURCE_LINKED";
 
   return (
     <div className="flex flex-col w-full text-on-surface">
@@ -142,7 +154,7 @@ export default function EscrowDetail() {
           <div className="flex items-center gap-space-sm font-mono-data-sm text-[12px] text-on-surface">
             <span className="material-symbols-outlined text-secondary text-[18px]">sync</span>
             <span>
-              <strong>Registry check complete, escrow still open — retry later</strong> (Reason: <code className="text-primary-fixed">{escrow.match_reason}</code>). The publication window remains active.
+              <strong>Consensus check complete, escrow remains OPEN &amp; retryable</strong> (Reason: <code className="text-primary-fixed">{escrow.match_reason}</code>). Publication window is active; retry whenever source release is published.
             </span>
           </div>
         </div>
@@ -185,9 +197,18 @@ export default function EscrowDetail() {
             <div className="lg:col-span-9 bg-surface-container-low p-space-lg md:p-space-xl flex flex-col justify-between shadow-sm">
               <div className="flex flex-col gap-space-sm">
                 <div className="flex flex-wrap items-center justify-between gap-space-sm">
-                  <div className="flex items-center gap-space-xs font-mono-label-xs text-mono-label-xs uppercase">
+                  <div className="flex flex-wrap items-center gap-space-xs font-mono-label-xs text-mono-label-xs uppercase">
                     <span className="px-2 py-0.5 bg-surface-container-highest text-on-surface">{escrow.template}</span>
-                    <span className="text-on-surface-variant font-mono-data-sm">REGISTRY TARGET SPEC</span>
+                    {isSourceLinked ? (
+                      <span className="px-2 py-0.5 bg-primary-fixed/20 text-primary-fixed font-bold border border-primary-fixed/40">
+                        SOURCE-LINKED RELEASE (v2)
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 bg-surface-container text-on-surface-variant font-mono">
+                        REGISTRY ONLY (v1)
+                      </span>
+                    )}
+                    <span className="text-on-surface-variant font-mono-data-sm hidden md:inline">TARGET SPEC</span>
                   </div>
                   <div className="font-mono-data-sm text-mono-data-sm text-on-surface-variant flex items-center gap-2">
                     <span className="material-symbols-outlined text-[15px] text-primary-container">lock_clock</span>
@@ -199,8 +220,39 @@ export default function EscrowDetail() {
                   {escrow.package_name} <span className="italic font-normal text-on-surface-variant">@ {escrow.version}</span>
                 </h1>
                 <p className="font-body-lg text-body-lg text-on-surface-variant max-w-3xl">
-                  Autonomous programmatic bounty conditioned on the canonical package release timeline and checksum notarization.
+                  {isSourceLinked
+                    ? "Autonomous programmatic bounty conditioned on dual consensus: verified in-window official registry publication and independent GitHub source release evidence."
+                    : "Autonomous programmatic bounty conditioned on the canonical package release timeline and checksum notarization."}
                 </p>
+
+                {/* Source-Linked Linkage Details */}
+                {isSourceLinked && (
+                  <div className="flex flex-wrap items-center gap-space-md bg-surface-container p-space-sm mt-space-xs font-mono-data-sm text-[12px]">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-on-surface-variant uppercase font-bold">EXPECTED REPO:</span>
+                      <a
+                        href={`https://github.com/${escrow.expected_repo}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-primary-fixed hover:underline font-bold"
+                      >
+                        {escrow.expected_repo}
+                      </a>
+                    </div>
+                    <span className="text-outline">|</span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-on-surface-variant uppercase font-bold">EXPECTED TAG:</span>
+                      <a
+                        href={`https://github.com/${escrow.expected_repo}/releases/tag/${escrow.expected_tag}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-primary-fixed hover:underline font-bold"
+                      >
+                        {escrow.expected_tag}
+                      </a>
+                    </div>
+                  </div>
+                )}
               </div>
               
               {/* Quick Stats CAD Ribbon - Distinct Dates */}
@@ -259,9 +311,9 @@ export default function EscrowDetail() {
                   {now < escrow.start
                     ? `The escrow is currently in its lead-time lock until window start (${escrow.window_start_utc}). The funder may cancel before this time.`
                     : now < escrow.windowEnd
-                    ? `The escrow is currently inside its publication window. A third-party observer or recipient may call release. If the package is not yet published or the registry is temporarily unavailable, the escrow remains OPEN and retryable without moving funds.`
+                    ? `The escrow is currently inside its publication window. A third-party observer or recipient may call release. If evidence is not yet available, not yet published, or temporary transport fails, the escrow remains OPEN and retryable without moving funds.`
                     : now < escrow.expire
-                    ? `The publication window ended at ${escrow.window_end_utc}. An in-window publication can still be claimed until ${escrow.expire_at_utc}. Otherwise, calling release will finalize a REFUND_NOHIT back to the funder.`
+                    ? `The publication window ended at ${escrow.window_end_utc}. An in-window release can still be claimed until ${escrow.expire_at_utc}. Otherwise, calling release with conclusive failure evidence will finalize a REFUND_NOHIT back to the funder.`
                     : `The 7-day settlement grace period has expired (${escrow.expire_at_utc}). Anyone may call expire to return funds to the funder.`
                   }
                 </p>
@@ -313,7 +365,7 @@ export default function EscrowDetail() {
                       <span className="font-headline-sm text-headline-sm text-on-surface uppercase">Trigger Release Check</span>
                     </div>
                     <p className="font-body-md text-body-md text-on-surface-variant">
-                      Permissionless trigger. If published in-window, 100% is paid to recipient. If early check is 404 or registry unavailable, escrow remains OPEN and retryable.
+                      Permissionless trigger. Validators independently verify {isSourceLinked ? "both registry and GitHub release" : "official registry release"}. If verified, 100% is paid to recipient. Inconclusive or early failure leaves escrow OPEN.
                     </p>
                     <button 
                       onClick={() => executeAction("release")}
@@ -321,7 +373,7 @@ export default function EscrowDetail() {
                       className="mt-space-sm w-full py-3 px-4 bg-primary-container hover:bg-primary text-on-primary-container font-body-md text-body-md uppercase font-bold tracking-wider transition-all duration-150 flex items-center justify-center gap-space-sm cursor-pointer disabled:opacity-50"
                     >
                       <span className="material-symbols-outlined text-[18px]">play_arrow</span>
-                      <span>{busyId === escrowId ? "PROCESSING..." : "Release / Check Registry"}</span>
+                      <span>{busyId === escrowId ? "PROCESSING..." : "Release / Check Verification"}</span>
                     </button>
                   </div>
                 )}
@@ -359,31 +411,38 @@ export default function EscrowDetail() {
         </div>
       </section>
 
-      {/* SECTION 3: OFFICIAL REGISTRY FEED QUERY */}
+      {/* SECTION 3: CONSENSUS EVIDENCE & ORACLE QUERIES */}
       <section className="w-full bg-surface px-margin-sm md:px-margin py-space-xl">
         <div className="flex flex-col gap-space-lg">
           <div className="flex flex-col md:flex-row md:items-end justify-between gap-space-sm">
             <div className="flex flex-col gap-space-xs">
               <div className="flex items-center gap-space-sm">
                 <span className="font-mono-label-xs text-mono-label-xs px-1.5 py-0.5 bg-surface-container text-primary-container uppercase font-bold">03</span>
-                <span className="font-mono-label-xs text-mono-label-xs text-on-surface-variant uppercase tracking-widest">[ORACLE ENGINE: DETERMINISTIC CONSENSUS]</span>
+                <span className="font-mono-label-xs text-mono-label-xs text-on-surface-variant uppercase tracking-widest">
+                  {isSourceLinked ? "[DUAL-SOURCE EQUIVALENCE CONSENSUS]" : "[ORACLE ENGINE: DETERMINISTIC CONSENSUS]"}
+                </span>
               </div>
-              <h2 className="font-headline-lg text-headline-lg-mobile md:text-headline-lg text-primary">Constructed Registry Query</h2>
+              <h2 className="font-headline-lg text-headline-lg-mobile md:text-headline-lg text-primary">
+                {isSourceLinked ? "Verified Release Consensus Evidence" : "Constructed Registry Query"}
+              </h2>
             </div>
             <div className="flex items-center gap-space-sm">
               <div className="px-3 py-1.5 bg-primary-container text-on-primary-container font-mono-label-xs text-mono-label-xs font-bold uppercase tracking-wider flex items-center gap-2">
                 <span className="material-symbols-outlined text-[16px]">verified</span>
-                <span>OFFICIAL REGISTRY FEED</span>
+                <span>{isSourceLinked ? "SOURCE-LINKED V2 PROTOCOL" : "OFFICIAL REGISTRY FEED"}</span>
               </div>
             </div>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-space-lg items-start">
-            <div className="lg:col-span-12 flex flex-col gap-space-md">
-              <div className="bg-surface-container-lowest p-space-md md:p-space-lg shadow-sm">
-                <div className="flex items-center justify-between pb-space-xs mb-space-sm">
-                  <span className="font-mono-label-xs text-mono-label-xs text-on-surface-variant uppercase tracking-wider">CANONICAL CONTRACT-BUILT ENDPOINT</span>
-                  <span className="font-mono-label-xs text-mono-label-xs text-primary-container">METHOD: HTTP_GET</span>
+            {/* Card 1: Official Package Registry */}
+            <div className={isSourceLinked ? "lg:col-span-6 flex flex-col gap-space-md" : "lg:col-span-12 flex flex-col gap-space-md"}>
+              <div className="bg-surface-container-lowest p-space-md md:p-space-lg shadow-sm flex flex-col gap-space-sm h-full">
+                <div className="flex items-center justify-between pb-space-xs border-b border-surface-container">
+                  <span className="font-mono-label-xs text-mono-label-xs text-on-surface-variant uppercase tracking-wider">
+                    SOURCE 1: OFFICIAL REGISTRY FEED
+                  </span>
+                  <span className="font-mono-label-xs text-mono-label-xs text-primary-container">HTTP_GET</span>
                 </div>
                 <div className="font-mono-data-sm text-mono-data-sm text-on-surface break-all bg-surface-container p-space-sm flex items-center justify-between gap-space-sm">
                   <code className="text-primary-fixed">{escrow.query_url || (escrow.template === "NPM_VERSION" ? `https://registry.npmjs.org/${escrow.package_name}` : `https://pypi.org/pypi/${escrow.package_name}/${escrow.version}/json`)}</code>
@@ -395,11 +454,58 @@ export default function EscrowDetail() {
                     <span className="material-symbols-outlined text-[16px]">file_copy</span>
                   </button>
                 </div>
-                <p className="font-mono-label-xs text-mono-label-xs text-on-surface-variant mt-space-xs">
-                  Queried directly by leaderless GenLayer consensus nodes. No intermediary centralized oracles or bridges.
-                </p>
+                {escrow.parsedRegistryEvidence ? (
+                  <div className="bg-surface-container p-space-sm text-[11px] font-mono flex flex-col gap-1 text-on-surface">
+                    <div className="text-primary-fixed font-bold uppercase">NORMALIZED REGISTRY RECORD:</div>
+                    <div>Exists: <strong>{String(escrow.parsedRegistryEvidence.exists)}</strong></div>
+                    <div>Published UTC: <strong>{escrow.parsedRegistryEvidence.published_utc || "N/A"}</strong></div>
+                    <div>Yanked: <strong>{String(escrow.parsedRegistryEvidence.yanked ?? false)}</strong></div>
+                    <div>Repository: <strong>{escrow.parsedRegistryEvidence.repository || "N/A"}</strong></div>
+                  </div>
+                ) : (
+                  <p className="font-mono-label-xs text-mono-label-xs text-on-surface-variant mt-space-xs">
+                    Queried directly by leaderless GenLayer consensus nodes. No intermediary centralized oracles.
+                  </p>
+                )}
               </div>
             </div>
+
+            {/* Card 2: Independent GitHub Source Evidence (When SOURCE_LINKED) */}
+            {isSourceLinked && (
+              <div className="lg:col-span-6 flex flex-col gap-space-md">
+                <div className="bg-surface-container-lowest p-space-md md:p-space-lg shadow-sm flex flex-col gap-space-sm h-full">
+                  <div className="flex items-center justify-between pb-space-xs border-b border-surface-container">
+                    <span className="font-mono-label-xs text-mono-label-xs text-on-surface-variant uppercase tracking-wider">
+                      SOURCE 2: GITHUB RELEASE EVIDENCE
+                    </span>
+                    <span className="font-mono-label-xs text-mono-label-xs text-primary-container">HTTP_GET</span>
+                  </div>
+                  <div className="font-mono-data-sm text-mono-data-sm text-on-surface break-all bg-surface-container p-space-sm flex items-center justify-between gap-space-sm">
+                    <code className="text-primary-fixed">https://api.github.com/repos/{escrow.expected_repo}/releases/tags/{escrow.expected_tag}</code>
+                    <button
+                      className="hover:text-primary-container text-on-surface-variant shrink-0"
+                      onClick={() => navigator.clipboard.writeText(`https://api.github.com/repos/${escrow.expected_repo}/releases/tags/${escrow.expected_tag}`)}
+                      title="Copy Endpoint"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">file_copy</span>
+                    </button>
+                  </div>
+                  {escrow.parsedGithubEvidence ? (
+                    <div className="bg-surface-container p-space-sm text-[11px] font-mono flex flex-col gap-1 text-on-surface">
+                      <div className="text-primary-fixed font-bold uppercase">NORMALIZED GITHUB RECORD:</div>
+                      <div>Exists: <strong>{String(escrow.parsedGithubEvidence.exists)}</strong></div>
+                      <div>Published UTC: <strong>{escrow.parsedGithubEvidence.published_utc || "N/A"}</strong></div>
+                      <div>Tag Name: <strong>{escrow.parsedGithubEvidence.tag_name || "N/A"}</strong></div>
+                      <div>Draft: <strong>{String(escrow.parsedGithubEvidence.draft ?? false)}</strong></div>
+                    </div>
+                  ) : (
+                    <p className="font-mono-label-xs text-mono-label-xs text-on-surface-variant mt-space-xs">
+                      Validators independently fetch GitHub release metadata and require exact tag matching and repository linkage.
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </section>

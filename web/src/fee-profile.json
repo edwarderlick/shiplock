@@ -19,6 +19,13 @@
       "totalMessageFees": "0",
       "rotationsPerRound": "1"
     },
+    "fund_verified_escrow": {
+      "leaderTimeunitsAllocation": "200",
+      "validatorTimeunitsAllocation": "400",
+      "executionBudgetPerRound": "25000000000000000",
+      "totalMessageFees": "0",
+      "rotationsPerRound": "1"
+    },
     "cancel": {
       "leaderTimeunitsAllocation": "200",
       "validatorTimeunitsAllocation": "400",

@@ -13,7 +13,7 @@
 
 ## Automated Contract Tests (Direct Test Suite)
 Command: `python -m pytest tests/direct -q`
-Result: **35 passed**
+Result: **43 passed** (direct tests) · `python -m pytest` → **56 passed** (combined)
 
 | # | Test Function | Expected Result | Pass/Fail |
 |---|---|---|---|
@@ -23,7 +23,7 @@ Result: **35 passed**
 | 4 | `test_unexpected_http_statuses_leave_open_before_and_after_window` | Unexpected HTTP statuses (429, 403, 301, 500) leave escrow `OPEN` before window (`EARLY_TEMPORARY_FAILURE`/`EARLY_UNAVAILABLE_RETRYABLE`) and after window (`POST_WINDOW_UNAVAILABLE`); never triggers premature refund or `INSUFFICIENT` | PASS |
 | 5 | `test_fund_escrow_permit_only_verified_absent` | Lookback permits only verified 404 or unreleased package version; reverts on published, yanked, or inconclusive lookbacks | PASS |
 | 6 | `test_npm_deprecated_version_is_released_not_yanked` | npm package with `deprecated` field warning is treated as valid release (`RELEASED`), not yanked | PASS |
-| 7 | `test_realistic_large_npm_response_and_oversize_cap` | Handles realistic large npm payloads; responses exceeding 500KB cap leave escrow `OPEN` without fund transfers | PASS |
+| 7 | `test_realistic_large_npm_response_and_oversize_cap` | Handles realistic large npm payloads; responses exceeding 256 KiB cap leave escrow `OPEN` without fund transfers | PASS |
 | 8 | `test_now_dt_fails_explicitly_when_tx_timestamp_unavailable` | Fails explicitly with `UserError` when transaction timestamp is unavailable in context | PASS |
 | 9 | `test_scoped_npm_package_success` | Handles scoped npm packages (e.g. `@scope/pkg`) successfully settling to `RELEASED` in-window | PASS |
 | 10 | `test_no_hit_refund_boundary_at_window_end` | Exact boundary test: 1s before window_end leaves escrow `OPEN` (`EARLY_404_RETRYABLE`) with no transfers; at or after window_end settles to `REFUND_NOHIT` (`WINDOW_EXPIRED_NO_RELEASE`) paying funder | PASS |
@@ -52,6 +52,14 @@ Result: **35 passed**
 | 33 | `test_fund_escrow_rejects_incomplete_evidence` | `fund_escrow` lookback rejects incomplete HTTP 200 responses (e.g. empty PyPI `urls[]` or missing npm `time[ver]`) | PASS |
 | 34 | `test_final_nohit_allowed_for_verified_timestamp_outside_window` | At or after window_end, verified publication strictly outside window settles to `REFUND_NOHIT` (`PUBLISHED_AFTER_WINDOW` or `PUBLISHED_BEFORE_WINDOW`) paying funder | PASS |
 | 35 | `test_npm_missing_or_malformed_versions_or_time_maps_cannot_fund_or_refund` | Minimal npm payload lacking `versions`/`time` maps is inconclusive; rejects `fund_escrow` and leaves escrow `OPEN` (`POST_WINDOW_INCONCLUSIVE`) after window_end | PASS |
+| 36 | `test_verified_escrow_input_validation_and_rejections` | Rejects invalid GitHub owner/repo (traversal, schemes, queries, fragments, whitespace, control chars, lengths) and tags (slashes, traversal, ref characters, whitespace, bounds) | PASS |
+| 37 | `test_verified_escrow_deterministic_id_and_audit_fields` | Verifies 11-element preimage SHA-256 derivation and complete audit view (`policy`, `expected_repo`, `expected_tag`, `package`, `package_name`, `version`, `match_reason`) | PASS |
+| 38 | `test_npm_verified_release_success` | Full dual-source verified release: npm package + matching GitHub repository + exact release tag in window settles to `RELEASED` (`VERIFIED_RELEASE`) and pays recipient | PASS |
+| 39 | `test_pypi_verified_release_success` | Full dual-source verified release: PyPI package + matching GitHub repository (`project_urls`) + exact release tag in window settles to `RELEASED` (`VERIFIED_RELEASE`) and pays recipient | PASS |
+| 40 | `test_verified_escrow_active_window_mismatches_stay_open` | Active window repository mismatch (`EARLY_REGISTRY_MISMATCH_RETRYABLE`) or tag mismatch (`EARLY_GITHUB_TAG_MISMATCH_RETRYABLE`) leaves escrow `OPEN` and retryable | PASS |
+| 41 | `test_verified_escrow_active_window_failures_and_transport_stay_open` | Active window GitHub 404 (`EARLY_GITHUB_404_RETRYABLE`), rate limits 403/429 (`EARLY_GITHUB_UNAVAILABLE_RETRYABLE`), server 500, or invalid JSON leave escrow `OPEN` | PASS |
+| 42 | `test_verified_escrow_post_window_settlement_and_inconclusive_safety` | Post-window conclusive mismatch settles to `REFUND_NOHIT` (`REGISTRY_REPO_MISMATCH` or `WINDOW_EXPIRED_GITHUB_NO_RELEASE`) paying funder; inconclusive transport error leaves escrow `OPEN` (`POST_WINDOW_GITHUB_UNAVAILABLE`) | PASS |
+| 43 | `test_verified_escrow_security_and_double_settlement` | Funder cannot release their own verified escrow; double release reverts; double refund reverts; economics remain exact across all verified state transitions | PASS |
 
 ---
 

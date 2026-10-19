@@ -36,6 +36,10 @@ import {
   validateTransferAllocations,
   getRpcTime,
   verifyEmittedTransferOrChildTx,
+  validateGithubRepo,
+  validateGithubTag,
+  normalizeGithubRepoUrl,
+  parseGithubReleaseMetadata,
 } from "../scripts/evidence_helper.mjs";
 
 describe("ShipLock Steward Evidence Harness Tests", () => {
@@ -2546,6 +2550,332 @@ describe("ShipLock Steward Evidence Harness Tests", () => {
       for (const sId of stewardIds) {
         assert.ok(onChainSet.has(sId), `Steward escrow ${sId} must be present on-chain`);
       }
+    });
+  });
+
+  describe("10. Milestone v2 Source-Linked Verified Release Evidence Tests", () => {
+    it("strictly validates canonical GitHub owner/repo format and rejects injection attacks", () => {
+      // Valid canonical repositories
+      const validCases = [
+        ["pallets/flask", "pallets/flask"],
+        ["octocat/Hello-World", "octocat/hello-world"],
+        ["my-org-123/cool_lib.v2", "my-org-123/cool_lib.v2"],
+        ["facebook/react", "facebook/react"],
+      ];
+      for (const [c, expectedNorm] of validCases) {
+        const res = validateGithubRepo(c);
+        assert.equal(res.valid, true, `Should accept valid repo: ${c}`);
+        assert.equal(res.normalized, expectedNorm);
+      }
+
+      // Valid hyphen, underscore, and dot cases
+      const validChars = validateGithubRepo("my-org-123/my-repo_v1.0.core");
+      assert.equal(validChars.valid, true);
+      assert.equal(validChars.normalized, "my-org-123/my-repo_v1.0.core");
+
+      // Length boundaries: 127 and 128 valid, 129 invalid
+      const repo127 = "a".repeat(38) + "/" + "b".repeat(88); // 38 + 1 + 88 = 127
+      assert.equal(repo127.length, 127);
+      assert.equal(validateGithubRepo(repo127).valid, true);
+
+      const repo128 = "a".repeat(38) + "/" + "b".repeat(89); // 38 + 1 + 89 = 128
+      assert.equal(repo128.length, 128);
+      assert.equal(validateGithubRepo(repo128).valid, true);
+
+      const repo129 = "a".repeat(38) + "/" + "b".repeat(90); // 38 + 1 + 90 = 129
+      assert.equal(repo129.length, 129);
+      assert.equal(validateGithubRepo(repo129).valid, false);
+
+      // Trailing .git strictly rejected
+      assert.equal(validateGithubRepo("pallets/flask.git").valid, false);
+      assert.equal(validateGithubRepo("owner/repo.git").valid, false);
+
+      // Unicode letters rejected
+      assert.equal(validateGithubRepo("octocat/héllo-world").valid, false);
+      assert.equal(validateGithubRepo("öwner/repo").valid, false);
+      assert.equal(validateGithubRepo("owner/rëpo").valid, false);
+
+      // Extra slashes rejected
+      assert.equal(validateGithubRepo("pallets/flask/extra").valid, false);
+      assert.equal(validateGithubRepo("/pallets/flask").valid, false);
+      assert.equal(validateGithubRepo("pallets/flask/").valid, false);
+
+      // Whitespace and control characters rejected
+      assert.equal(validateGithubRepo("").valid, false);
+      assert.equal(validateGithubRepo("   ").valid, false);
+      assert.equal(validateGithubRepo(" pallets/flask").valid, false);
+      assert.equal(validateGithubRepo("pallets/flask ").valid, false);
+      assert.equal(validateGithubRepo("pallets/ flask").valid, false);
+      assert.equal(validateGithubRepo("pallets/flask\0evil").valid, false);
+      assert.equal(validateGithubRepo("pallets/flask\n").valid, false);
+      assert.equal(validateGithubRepo("pallets/flask\t").valid, false);
+
+      // Malicious or malformed inputs MUST fail closed
+      const invalidCases = [
+        "pallets", // missing slash
+        "https://github.com/pallets/flask", // URL scheme
+        "git://github.com/pallets/flask", // scheme
+        "pallets/flask?query=true", // query string
+        "pallets/flask#tag", // fragment
+        "pallets:flask", // colon
+        "pallets/flask:8080", // port
+        "../pallets/flask", // traversal
+        "pallets/../flask", // traversal
+        "pallets/..", // traversal
+        "pallets/flask%2Fevil", // url encoded
+        "-pallets/flask", // invalid owner start
+        "pallets-/flask", // invalid owner end
+      ];
+
+      for (const inv of invalidCases) {
+        const res = validateGithubRepo(inv);
+        assert.equal(res.valid, false, `Must reject invalid repo: ${inv}`);
+        assert.notEqual(res.error, null);
+      }
+    });
+
+    it("strictly validates canonical GitHub release tag syntax and rejects dangerous ref characters", () => {
+      const validTags = [
+        "v1.0.0",
+        "1.0.0",
+        "v2.1.0-rc1",
+        "release-2026.10",
+        "v0.0.1+build.123",
+      ];
+      for (const t of validTags) {
+        const res = validateGithubTag(t);
+        assert.equal(res.valid, true, `Should accept valid tag: ${t}`);
+      }
+
+      // Valid hyphen, underscore, and dot cases
+      assert.equal(validateGithubTag("v1.0.0-rc_1.patch").valid, true);
+      assert.equal(validateGithubTag("release-2026.10_build.1").valid, true);
+
+      // Length boundaries: 127 and 128 valid, 129 invalid
+      const tag127 = "v" + "a".repeat(126); // 127 chars
+      assert.equal(tag127.length, 127);
+      assert.equal(validateGithubTag(tag127).valid, true);
+
+      const tag128 = "v" + "a".repeat(127); // 128 chars
+      assert.equal(tag128.length, 128);
+      assert.equal(validateGithubTag(tag128).valid, true);
+
+      const tag129 = "v" + "a".repeat(128); // 129 chars
+      assert.equal(tag129.length, 129);
+      assert.equal(validateGithubTag(tag129).valid, false);
+
+      // Unicode letters rejected
+      assert.equal(validateGithubTag("v1.0.0-β").valid, false);
+      assert.equal(validateGithubTag("v1.0.0-ü").valid, false);
+      assert.equal(validateGithubTag("tag-日本語").valid, false);
+
+      // Extra slashes rejected
+      assert.equal(validateGithubTag("v1.0/extra").valid, false);
+      assert.equal(validateGithubTag("/v1.0.0").valid, false);
+      assert.equal(validateGithubTag("v1.0.0/").valid, false);
+
+      // Whitespace and control characters rejected
+      assert.equal(validateGithubTag("").valid, false);
+      assert.equal(validateGithubTag("   ").valid, false);
+      assert.equal(validateGithubTag(" v1.0.0").valid, false);
+      assert.equal(validateGithubTag("v1.0.0 ").valid, false);
+      assert.equal(validateGithubTag("v1 0").valid, false);
+      assert.equal(validateGithubTag("v1.0.0\t").valid, false);
+      assert.equal(validateGithubTag("v1.0.0\n").valid, false);
+      assert.equal(validateGithubTag("v1\x1f").valid, false);
+
+      const invalidTags = [
+        "v1.0.0.", // trailing dot
+        "v1..0", // double dot git ref forbidden
+        "v1.0~1", // tilde git ref forbidden
+        "v1.0^2", // caret git ref forbidden
+        "v1.0:tag", // colon forbidden
+        "v1.0?x", // question mark forbidden
+        "v1.0#x", // fragment forbidden
+        "v1.0*x", // asterisk forbidden
+        "v1.0[x]", // bracket forbidden
+        "v1.0@{1}", // reflog notation forbidden
+        "v1.0//v2", // double slash forbidden
+        "v1.0\\x", // backslash forbidden
+        "v1.0.lock", // .lock forbidden
+      ];
+
+      for (const inv of invalidTags) {
+        const res = validateGithubTag(inv);
+        assert.equal(res.valid, false, `Must reject invalid tag: ${inv}`);
+      }
+    });
+
+    it("normalizes diverse git repository URLs into canonical owner/repo form", () => {
+      const testMappings = [
+        ["https://github.com/pallets/flask", "pallets/flask"],
+        ["https://github.com/pallets/flask.git", "pallets/flask"],
+        ["http://github.com/pallets/flask", "pallets/flask"],
+        ["git+https://github.com/pallets/flask.git", "pallets/flask"],
+        ["git@github.com:pallets/flask.git", "pallets/flask"],
+        ["ssh://git@github.com/pallets/flask", "pallets/flask"],
+        ["github:pallets/flask", "pallets/flask"],
+        ["pallets/flask", "pallets/flask"],
+        ["https://github.com/pallets/flask?param=1", "pallets/flask"],
+        ["https://github.com/pallets/flask#readme", "pallets/flask"],
+        // Specific regression cases from security specification:
+        ["https://github.com/Owner/Repo", "owner/repo"],
+        ["https://github.com/Owner/Repo.git", "owner/repo"],
+        ["git+https://github.com/Owner/Repo.git", "owner/repo"],
+        ["ssh://git@github.com/Owner/Repo", "owner/repo"],
+        ["git@github.com:Owner/Repo.git", "owner/repo"],
+        ["github:Owner/Repo", "owner/repo"],
+        ["Owner/Repo", "owner/repo"],
+      ];
+
+      for (const [input, expected] of testMappings) {
+        const norm = normalizeGithubRepoUrl(input);
+        assert.equal(norm, expected, `Failed normalizing ${input}`);
+      }
+
+      // Non-github, spoofed hostnames, embedded paths, and attack URLs normalize to empty string
+      const invalidUrls = [
+        "https://evil.example/github.com/owner/repo",
+        "https://notgithub.com/owner/repo",
+        "git@evilgithub.com:owner/repo",
+        "https://github.com.evil/owner/repo",
+        "https://github.com/owner/repo/issues",
+        "https://github.com/owner/repo/tree/main",
+        "github://owner/repo",
+        "https://github.com:443/owner/repo",
+        "https://gitlab.com/pallets/flask",
+        "https://evil.com/github.com/pallets/flask",
+        "https://github.com/pallets/flask/../evil",
+        "not a url",
+      ];
+      for (const inv of invalidUrls) {
+        const norm = normalizeGithubRepoUrl(inv);
+        assert.equal(norm, "", `Must reject non-github or malformed url: ${inv}`);
+      }
+    });
+
+    it("parses GitHub release metadata correctly and flags mismatches or incompleteness", () => {
+      // 1. Valid matching release
+      const validRelease = {
+        tag_name: "v3.0.0",
+        name: "Flask 3.0.0 Release",
+        published_at: "2026-10-15T14:30:00Z",
+        created_at: "2026-10-15T14:00:00Z",
+        draft: false,
+        prerelease: false,
+      };
+      const p1 = parseGithubReleaseMetadata(validRelease, "pallets/flask", "v3.0.0");
+      assert.equal(p1.kind, "200");
+      assert.equal(p1.exists, true);
+      assert.equal(p1.tag_name, "v3.0.0");
+      assert.equal(p1.published_utc, "2026-10-15T14:30:00.000Z");
+      assert.equal(p1.draft, false);
+
+      // 2. Tag mismatch
+      const p2 = parseGithubReleaseMetadata(validRelease, "pallets/flask", "v2.9.9");
+      assert.equal(p2.kind, "mismatch");
+      assert.equal(p2.tag_name, "v3.0.0");
+
+      // 3. Missing tag_name
+      const missingTag = { published_at: "2026-10-15T14:30:00Z" };
+      const p3 = parseGithubReleaseMetadata(missingTag, "pallets/flask", "v3.0.0");
+      assert.equal(p3.kind, "inconclusive");
+
+      // 4. Missing timestamps
+      const missingTime = { tag_name: "v3.0.0" };
+      const p4 = parseGithubReleaseMetadata(missingTime, "pallets/flask", "v3.0.0");
+      assert.equal(p4.kind, "inconclusive");
+
+      // 5. Non-JSON input
+      const p5 = parseGithubReleaseMetadata("raw string 404", "pallets/flask", "v3.0.0");
+      assert.equal(p5.kind, "non-json");
+    });
+
+    it("simulates dual-source consensus: requires both in-window publish and exact repo/tag match", () => {
+      const windowStart = parseUtcIso("2026-10-14T00:00:00Z");
+      const windowEnd = parseUtcIso("2026-10-16T00:00:00Z");
+
+      // Evaluator function matching contract release logic
+      function evaluateRelease(regEvidence, ghEvidence, nowUtc) {
+        // Registry check
+        const regOk = regEvidence.kind === "200" && !regEvidence.yanked;
+        let regInWindow = false;
+        if (regOk && regEvidence.publish_time) {
+          const t = parseUtcIso(regEvidence.publish_time);
+          regInWindow = t >= windowStart && t <= windowEnd;
+        }
+
+        // GitHub check
+        const ghOk = ghEvidence.kind === "200" && ghEvidence.exists && !ghEvidence.draft;
+        let ghInWindow = false;
+        if (ghOk && ghEvidence.published_utc) {
+          const t = parseUtcIso(ghEvidence.published_utc);
+          ghInWindow = t >= windowStart && t <= windowEnd;
+        }
+
+        const repoMatches = regEvidence.repository === "pallets/flask";
+        const tagMatches = ghEvidence.tag_name === "v3.0.0";
+
+        // If all conditions met -> RELEASE
+        if (regOk && regInWindow && ghOk && ghInWindow && repoMatches && tagMatches) {
+          return { status: "RELEASED", reason: "VERIFIED_SOURCE_LINKED_RELEASE" };
+        }
+
+        // Inside window: transport or missing evidence remains OPEN
+        if (nowUtc <= windowEnd) {
+          return { status: "OPEN", reason: "EARLY_EVIDENCE_RETRYABLE" };
+        }
+
+        // After window: transport or inconclusive failures must stay OPEN fail-closed
+        const regInconclusive = ["unavailable", "oversize", "non-json", "inconclusive", "500", "502", "503", "504"].includes(regEvidence.kind);
+        const ghInconclusive = ["unavailable", "oversize", "non-json", "inconclusive", "500", "502", "503", "504"].includes(ghEvidence.kind);
+        if (regInconclusive || ghInconclusive) {
+          return { status: "OPEN", reason: "TRANSPORT_FAILURE_FAIL_CLOSED" };
+        }
+
+        // After window: conclusive absence, yank, or mismatch triggers REFUND_NOHIT
+        const regFailedConclusively = regEvidence.kind === "404" || regEvidence.yanked || !regInWindow || !repoMatches;
+        const ghFailedConclusively = ghEvidence.kind === "404" || ghEvidence.kind === "mismatch" || !ghInWindow || !tagMatches;
+        if (regFailedConclusively || ghFailedConclusively) {
+          return { status: "REFUND_NOHIT", reason: "NOHIT_SOURCE_LINKED_FAILURE" };
+        }
+
+        // Otherwise stay OPEN
+        return { status: "OPEN", reason: "TRANSPORT_FAILURE_FAIL_CLOSED" };
+      }
+
+      const activeNow = parseUtcIso("2026-10-15T12:00:00Z");
+      const postWindowNow = parseUtcIso("2026-10-17T12:00:00Z");
+
+      // Scenario A: Both in window and match -> RELEASE
+      const passReg = { kind: "200", yanked: false, publish_time: "2026-10-15T10:00:00Z", repository: "pallets/flask" };
+      const passGh = { kind: "200", exists: true, draft: false, tag_name: "v3.0.0", published_utc: "2026-10-15T09:30:00Z" };
+      const resA = evaluateRelease(passReg, passGh, activeNow);
+      assert.equal(resA.status, "RELEASED");
+      assert.equal(resA.reason, "VERIFIED_SOURCE_LINKED_RELEASE");
+
+      // Scenario B: Active window, GitHub 404 -> stays OPEN retryable
+      const gh404 = { kind: "404", exists: false, draft: false, tag_name: "", published_utc: "" };
+      const resB = evaluateRelease(passReg, gh404, activeNow);
+      assert.equal(resB.status, "OPEN");
+      assert.equal(resB.reason, "EARLY_EVIDENCE_RETRYABLE");
+
+      // Scenario C: Active window, repository mismatch -> stays OPEN retryable
+      const mismatchReg = { kind: "200", yanked: false, publish_time: "2026-10-15T10:00:00Z", repository: "other/flask" };
+      const resC = evaluateRelease(mismatchReg, passGh, activeNow);
+      assert.equal(resC.status, "OPEN");
+      assert.equal(resC.reason, "EARLY_EVIDENCE_RETRYABLE");
+
+      // Scenario D: Post window, conclusive GitHub 404 -> REFUND_NOHIT
+      const resD = evaluateRelease(passReg, gh404, postWindowNow);
+      assert.equal(resD.status, "REFUND_NOHIT");
+      assert.equal(resD.reason, "NOHIT_SOURCE_LINKED_FAILURE");
+
+      // Scenario E: Post window, registry transport 500 failure -> stays OPEN fail-closed!
+      const transportFailReg = { kind: "500", error: "server error" };
+      const resE = evaluateRelease(transportFailReg, passGh, postWindowNow);
+      assert.equal(resE.status, "OPEN");
+      assert.equal(resE.reason, "TRANSPORT_FAILURE_FAIL_CLOSED");
     });
   });
 });

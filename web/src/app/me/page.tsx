@@ -58,6 +58,9 @@ export default function MyLocks() {
         return {
           id: e.id || id,
           registry: e.template === "NPM_VERSION" ? "NPM" : "PYPI",
+          policy: e.policy || "REGISTRY_ONLY",
+          expectedRepo: e.expected_repo || "",
+          expectedTag: e.expected_tag || "",
           state: e.status,
           pkg: e.package_name,
           ver: e.version,
@@ -301,10 +304,20 @@ export default function MyLocks() {
                       </span>
                     )}
                     <span className="text-on-surface-variant font-mono-data-sm text-[12px]">{escrow.registry}</span>
+                    {escrow.policy === 'SOURCE_LINKED' && (
+                      <span className="px-1.5 py-0.5 bg-primary-fixed/20 text-primary-fixed text-[10px] font-mono font-bold uppercase border border-primary-fixed/30">
+                        SOURCE-LINKED v2
+                      </span>
+                    )}
                   </div>
                   <span className="font-headline-sm text-headline-sm text-primary mt-1">
                     <Link className="hover:text-primary-fixed" href={`/escrow/${escrow.id}`}>{escrow.pkg}</Link> @ {escrow.ver}
                   </span>
+                  {escrow.policy === 'SOURCE_LINKED' && escrow.expectedRepo && (
+                    <span className="font-mono text-[11px] text-primary-fixed">
+                      GitHub: {escrow.expectedRepo}@{escrow.expectedTag}
+                    </span>
+                  )}
                   <span className="font-mono-data-sm text-mono-data-sm text-on-surface-variant">{escrow.desc}</span>
                 </div>
                 
@@ -353,10 +366,20 @@ export default function MyLocks() {
                       escrow.state === 'REFUND_NOHIT' ? 'bg-error-container text-on-error-container' :
                       'bg-surface-container-highest text-on-surface-variant'
                     }`}>{escrow.state}</span>
+                    {escrow.policy === 'SOURCE_LINKED' && (
+                      <span className="px-1.5 py-0.5 bg-primary-fixed/20 text-primary-fixed text-[10px] font-mono font-bold uppercase border border-primary-fixed/30">
+                        SOURCE-LINKED v2
+                      </span>
+                    )}
                   </div>
                   <span className="font-headline-sm text-headline-sm text-primary mt-1">
                     <Link className="hover:text-primary-fixed" href={`/escrow/${escrow.id}`}>{escrow.pkg}</Link> @ {escrow.ver}
                   </span>
+                  {escrow.policy === 'SOURCE_LINKED' && escrow.expectedRepo && (
+                    <span className="font-mono text-[11px] text-primary-fixed">
+                      GitHub: {escrow.expectedRepo}@{escrow.expectedTag}
+                    </span>
+                  )}
                   <span className="font-mono-data-sm text-mono-data-sm text-on-surface-variant">ID: {escrow.id}</span>
                 </div>
                 <div className="flex flex-col md:items-center gap-0.5">

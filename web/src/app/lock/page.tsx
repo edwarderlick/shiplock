@@ -6,14 +6,17 @@ import { writeIc, verifyCreatedEscrow } from "@/lib/write";
 import { parseEther, getAddress } from "viem";
 import { CONTRACT_ADDRESS } from "@/lib/env";
 import { client } from "@/lib/contract";
-import { deriveEscrowId, generateEscrowNonce } from "@/lib/escrow";
+import { deriveEscrowId, generateEscrowNonce, validateGithubRepo, validateGithubTag } from "@/lib/escrow";
 import { useRouter } from "next/navigation";
 
 export default function LockPage() {
   const { address, selectedProvider } = useWallet();
+  const [policy, setPolicy] = useState<"SOURCE_LINKED" | "REGISTRY_ONLY">("SOURCE_LINKED");
   const [template, setTemplate] = useState<"PYPI" | "NPM">("PYPI");
   const [pkg, setPkg] = useState("");
   const [ver, setVer] = useState("");
+  const [expectedRepo, setExpectedRepo] = useState("");
+  const [expectedTag, setExpectedTag] = useState("");
   const [recipient, setRecipient] = useState("");
   const [amount, setAmount] = useState("");
   
@@ -44,9 +47,22 @@ export default function LockPage() {
     setEndUtc(end.toISOString().split('.')[0] + 'Z');
   }, []);
 
+  const repoValidation = useMemo(() => {
+    if (policy !== "SOURCE_LINKED") return { valid: true };
+    return validateGithubRepo(expectedRepo);
+  }, [policy, expectedRepo]);
+
+  const tagValidation = useMemo(() => {
+    if (policy !== "SOURCE_LINKED") return { valid: true };
+    return validateGithubTag(expectedTag);
+  }, [policy, expectedTag]);
+
   // Compute expected deterministic escrow ID preview from active inputs
   const expectedEscrowId = useMemo(() => {
     if (!address || !recipient || !pkg || !ver || !startUtc || !endUtc) {
+      return null;
+    }
+    if (policy === "SOURCE_LINKED" && (!repoValidation.valid || !tagValidation.valid || !expectedRepo || !expectedTag)) {
       return null;
     }
     try {
@@ -62,11 +78,14 @@ export default function LockPage() {
         windowEndUtc: endUtc,
         amountWei: value,
         nonce,
+        policy,
+        expectedRepo: policy === "SOURCE_LINKED" ? (repoValidation.normalized || expectedRepo.trim()) : undefined,
+        expectedTag: policy === "SOURCE_LINKED" ? expectedTag.trim() : undefined,
       });
     } catch {
       return null;
     }
-  }, [address, recipient, pkg, ver, startUtc, endUtc, amount, template, nonce]);
+  }, [address, recipient, pkg, ver, startUtc, endUtc, amount, template, nonce, policy, expectedRepo, expectedTag, repoValidation, tagValidation]);
 
   const broadcastTransaction = async () => {
     if (!address) {
@@ -90,6 +109,17 @@ export default function LockPage() {
       return;
     }
 
+    if (policy === "SOURCE_LINKED") {
+      if (!repoValidation.valid) {
+        alert(repoValidation.error || "Invalid expected repository");
+        return;
+      }
+      if (!tagValidation.valid) {
+        alert(tagValidation.error || "Invalid expected release tag");
+        return;
+      }
+    }
+
     setTxProgress("ESTIMATING FEES");
     setTxError(null);
     setTxHash(null);
@@ -101,6 +131,9 @@ export default function LockPage() {
     const pkgArg = pkg.trim();
     const verArg = ver.trim();
     const value = parseEther(amount || "0");
+    const isVerified = policy === "SOURCE_LINKED";
+    const validatedRepo = isVerified ? repoValidation.normalized! : "";
+    const validatedTag = isVerified ? expectedTag.trim() : "";
 
     // Derive deterministic expected ID before broadcast
     const expectedId = deriveEscrowId({
@@ -113,22 +146,37 @@ export default function LockPage() {
       windowEndUtc: endUtc,
       amountWei: value,
       nonce,
+      policy,
+      expectedRepo: isVerified ? validatedRepo : undefined,
+      expectedTag: isVerified ? validatedTag : undefined,
     });
 
     try {
       const { returnedId } = await writeIc({
         account: address,
         provider: selectedProvider,
-        functionName: "fund_escrow",
-        args: [
-          templateArg,
-          pkgArg,
-          verArg,
-          normalizedRecipient,
-          startUtc,
-          endUtc,
-          nonce, // 7th argument: unique unsigned bigint nonce
-        ],
+        functionName: isVerified ? "fund_verified_escrow" : "fund_escrow",
+        args: isVerified
+          ? [
+              templateArg,
+              pkgArg,
+              verArg,
+              validatedRepo,
+              validatedTag,
+              normalizedRecipient,
+              startUtc,
+              endUtc,
+              nonce,
+            ]
+          : [
+              templateArg,
+              pkgArg,
+              verArg,
+              normalizedRecipient,
+              startUtc,
+              endUtc,
+              nonce,
+            ],
         value,
         onProgress: (stage, extra) => {
           setTxProgress(stage);
@@ -152,6 +200,9 @@ export default function LockPage() {
         version: verArg,
         amountWei: value,
         nonce,
+        policy,
+        expectedRepo: isVerified ? validatedRepo : undefined,
+        expectedTag: isVerified ? validatedTag : undefined,
         maxAttempts: 10,
         intervalMs: 1500,
       });
@@ -234,17 +285,65 @@ export default function LockPage() {
           {/* LEFT INTERACTION DOCK: FORM INPUTS */}
           <div className="lg:col-span-7 flex flex-col gap-space-lg">
             
-            {/* STEP 01 */}
+            {/* STEP 01 - VERIFICATION POLICY */}
             <div className="bg-surface-container-low p-space-lg flex flex-col gap-space-md">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-space-sm">
                   <span className="px-2 py-0.5 bg-surface-container text-primary-fixed font-mono-label-xs text-mono-label-xs uppercase tracking-wider font-bold">STAGE 01</span>
+                  <h2 className="font-headline-md text-headline-md text-primary">Verification Policy</h2>
+                </div>
+                <span className="font-mono-label-xs text-mono-label-xs text-on-surface-variant">[POLICY: v2 DUAL CONSENSUS]</span>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-space-md">
+                <button
+                  type="button"
+                  onClick={() => setPolicy("SOURCE_LINKED")}
+                  className={`p-space-md border flex flex-col gap-1 transition-all text-left ${
+                    policy === "SOURCE_LINKED"
+                      ? "border-primary-fixed bg-surface-container text-primary-fixed shadow-md"
+                      : "border-outline/20 bg-surface-container-lowest text-on-surface hover:border-outline/40"
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-headline-sm text-[15px] uppercase font-bold">Source-Linked Release</span>
+                    <span className="px-1.5 py-0.2 bg-primary-fixed/20 text-primary-fixed text-[10px] font-mono font-bold uppercase">v2 MILESTONE</span>
+                  </div>
+                  <span className="font-mono-data-sm text-[12px] opacity-80 mt-1">
+                    Multi-source: verifies npm/PyPI publish in UTC window AND matching GitHub repository & exact release tag.
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPolicy("REGISTRY_ONLY")}
+                  className={`p-space-md border flex flex-col gap-1 transition-all text-left ${
+                    policy === "REGISTRY_ONLY"
+                      ? "border-primary-fixed bg-surface-container text-primary-fixed shadow-md"
+                      : "border-outline/20 bg-surface-container-lowest text-on-surface hover:border-outline/40"
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-headline-sm text-[15px] uppercase font-bold">Registry Release</span>
+                    <span className="px-1.5 py-0.2 bg-surface-container-high text-on-surface-variant text-[10px] font-mono uppercase">v1 CLASSIC</span>
+                  </div>
+                  <span className="font-mono-data-sm text-[12px] opacity-80 mt-1">
+                    Single source: settles strictly on official package registry metadata within the escrow UTC window.
+                  </span>
+                </button>
+              </div>
+            </div>
+
+            {/* STEP 02 - REGISTRY ECOSYSTEM */}
+            <div className="bg-surface-container-low p-space-lg flex flex-col gap-space-md">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-space-sm">
+                  <span className="px-2 py-0.5 bg-surface-container text-primary-fixed font-mono-label-xs text-mono-label-xs uppercase tracking-wider font-bold">STAGE 02</span>
                   <h2 className="font-headline-md text-headline-md text-primary">Registry Ecosystem</h2>
                 </div>
                 <span className="font-mono-label-xs text-mono-label-xs text-on-surface-variant">[PROTOCOL: CAD_PY_NPM]</span>
               </div>
               <div className="grid grid-cols-2 gap-space-md">
                 <button 
+                  type="button"
                   onClick={() => setTemplate("PYPI")}
                   className={`p-space-md border flex flex-col gap-1 transition-all ${
                     template === "PYPI" 
@@ -256,6 +355,7 @@ export default function LockPage() {
                   <span className="font-mono-data-sm text-[12px] opacity-75">pypi.org/pypi/{"{pkg}"}/{"{ver}"}/json</span>
                 </button>
                 <button 
+                  type="button"
                   onClick={() => setTemplate("NPM")}
                   className={`p-space-md border flex flex-col gap-1 transition-all ${
                     template === "NPM" 
@@ -269,11 +369,11 @@ export default function LockPage() {
               </div>
             </div>
 
-            {/* STEP 02 */}
+            {/* STEP 03 - PACKAGE & TARGET VERSION */}
             <div className="bg-surface-container-low p-space-lg flex flex-col gap-space-md">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-space-sm">
-                  <span className="px-2 py-0.5 bg-surface-container text-primary-fixed font-mono-label-xs text-mono-label-xs uppercase tracking-wider font-bold">STAGE 02</span>
+                  <span className="px-2 py-0.5 bg-surface-container text-primary-fixed font-mono-label-xs text-mono-label-xs uppercase tracking-wider font-bold">STAGE 03</span>
                   <h2 className="font-headline-md text-headline-md text-primary">Package & Target Version</h2>
                 </div>
                 <span className="font-mono-label-xs text-mono-label-xs text-on-surface-variant">[LOOKBACK: VERIFIED 404 REQUIRED]</span>
@@ -300,11 +400,67 @@ export default function LockPage() {
               </div>
             </div>
 
-            {/* STEP 03 */}
+            {/* STEP 04 - GITHUB SOURCE RELEASE EVIDENCE (ONLY FOR SOURCE_LINKED) */}
+            {policy === "SOURCE_LINKED" && (
+              <div className="bg-surface-container-low p-space-lg flex flex-col gap-space-md border-l-2 border-primary-fixed">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-space-sm">
+                    <span className="px-2 py-0.5 bg-primary-container text-on-primary-container font-mono-label-xs text-mono-label-xs uppercase tracking-wider font-bold">STAGE 04</span>
+                    <h2 className="font-headline-md text-headline-md text-primary">GitHub Source Evidence</h2>
+                  </div>
+                  <span className="font-mono-label-xs text-mono-label-xs text-primary-fixed font-bold">[INDEPENDENT EVIDENCE]</span>
+                </div>
+                <p className="font-body-md text-body-md text-on-surface-variant">
+                  Validators independently query GitHub’s release API to verify the release tag exists and links to this canonical repository.
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-space-md">
+                  <div className="flex flex-col gap-1">
+                    <label className="font-mono-label-xs text-mono-label-xs uppercase text-on-surface-variant tracking-wider">
+                      Expected Repository (owner/repo)
+                    </label>
+                    <input
+                      value={expectedRepo}
+                      onChange={(e) => setExpectedRepo(e.target.value)}
+                      placeholder="e.g. pallets/flask"
+                      className="bg-surface-container-lowest p-space-sm text-primary font-mono-data-sm text-mono-data-sm focus:outline-none focus:ring-1 focus:ring-primary-fixed"
+                    />
+                    {expectedRepo.trim() && (
+                      <span className={`text-[11px] font-mono mt-0.5 ${repoValidation.valid ? "text-primary-fixed" : "text-error"}`}>
+                        {repoValidation.valid ? `✓ Canonical: ${repoValidation.normalized}` : `✗ ${repoValidation.error}`}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <label className="font-mono-label-xs text-mono-label-xs uppercase text-on-surface-variant tracking-wider">
+                      Expected Release Tag
+                    </label>
+                    <input
+                      value={expectedTag}
+                      onChange={(e) => setExpectedTag(e.target.value)}
+                      placeholder="e.g. 3.0.0 or v3.0.0"
+                      className="bg-surface-container-lowest p-space-sm text-primary font-mono-data-sm text-mono-data-sm focus:outline-none focus:ring-1 focus:ring-primary-fixed"
+                    />
+                    {expectedTag.trim() && (
+                      <span className={`text-[11px] font-mono mt-0.5 ${tagValidation.valid ? "text-primary-fixed" : "text-error"}`}>
+                        {tagValidation.valid ? `✓ Valid Git Ref` : `✗ ${tagValidation.error}`}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="bg-surface-container p-space-xs text-[11px] font-mono text-on-surface-variant flex items-center gap-1.5">
+                  <span className="text-primary-fixed font-bold">API ENDPOINT:</span>
+                  <span>api.github.com/repos/{repoValidation.normalized || "{owner}/{repo}"}/releases/tags/{expectedTag.trim() || "{tag}"}</span>
+                </div>
+              </div>
+            )}
+
+            {/* STEP 05 - BENEFICIARY ADDRESS */}
             <div className="bg-surface-container-low p-space-lg flex flex-col gap-space-md">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-space-sm">
-                  <span className="px-2 py-0.5 bg-surface-container text-primary-fixed font-mono-label-xs text-mono-label-xs uppercase tracking-wider font-bold">STAGE 03</span>
+                  <span className="px-2 py-0.5 bg-surface-container text-primary-fixed font-mono-label-xs text-mono-label-xs uppercase tracking-wider font-bold">
+                    {policy === "SOURCE_LINKED" ? "STAGE 05" : "STAGE 04"}
+                  </span>
                   <h2 className="font-headline-md text-headline-md text-primary">Beneficiary Address</h2>
                 </div>
                 <span className="font-mono-label-xs text-mono-label-xs text-on-surface-variant">[RULE: RECIPIENT != FUNDER]</span>
@@ -320,11 +476,13 @@ export default function LockPage() {
               </div>
             </div>
 
-            {/* STEP 04 */}
+            {/* STEP 06 - TIMELINE WINDOWS */}
             <div className="bg-surface-container-low p-space-lg flex flex-col gap-space-md">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-space-sm">
-                  <span className="px-2 py-0.5 bg-surface-container text-primary-fixed font-mono-label-xs text-mono-label-xs uppercase tracking-wider font-bold">STAGE 04</span>
+                  <span className="px-2 py-0.5 bg-surface-container text-primary-fixed font-mono-label-xs text-mono-label-xs uppercase tracking-wider font-bold">
+                    {policy === "SOURCE_LINKED" ? "STAGE 06" : "STAGE 05"}
+                  </span>
                   <h2 className="font-headline-md text-headline-md text-primary">Timeline Windows (UTC)</h2>
                 </div>
                 <span className="font-mono-label-xs text-mono-label-xs text-on-surface-variant">[TIMELOCK: 24H LEAD-TIME]</span>
@@ -365,11 +523,13 @@ export default function LockPage() {
               </div>
             </div>
 
-            {/* STEP 05 */}
+            {/* STEP 07 - ESCROW LIQUIDITY */}
             <div className="bg-surface-container-low p-space-lg flex flex-col gap-space-md">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-space-sm">
-                  <span className="px-2 py-0.5 bg-surface-container text-primary-fixed font-mono-label-xs text-mono-label-xs uppercase tracking-wider font-bold">STAGE 05</span>
+                  <span className="px-2 py-0.5 bg-surface-container text-primary-fixed font-mono-label-xs text-mono-label-xs uppercase tracking-wider font-bold">
+                    {policy === "SOURCE_LINKED" ? "STAGE 07" : "STAGE 06"}
+                  </span>
                   <h2 className="font-headline-md text-headline-md text-primary">Escrow Liquidity</h2>
                 </div>
                 <span className="font-mono-label-xs text-mono-label-xs text-on-surface-variant">[TOKEN: GEN NATIVE]</span>
@@ -405,11 +565,13 @@ export default function LockPage() {
               </div>
             </div>
 
-            {/* STEP 06 */}
+            {/* STEP 08 - FINAL VERIFICATION & COMMIT */}
             <div className="bg-surface-container-low p-space-lg flex flex-col gap-space-md">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-space-sm">
-                  <span className="px-2 py-0.5 bg-primary-container text-on-primary-container font-mono-label-xs text-mono-label-xs uppercase tracking-wider font-black">STAGE 06</span>
+                  <span className="px-2 py-0.5 bg-primary-container text-on-primary-container font-mono-label-xs text-mono-label-xs uppercase tracking-wider font-black">
+                    {policy === "SOURCE_LINKED" ? "STAGE 08" : "STAGE 07"}
+                  </span>
                   <h2 className="font-headline-md text-headline-md text-primary">Final Verification & Commit</h2>
                 </div>
                 <span className="font-mono-label-xs text-mono-label-xs text-primary-fixed font-mono">[CHAIN: 61997]</span>
@@ -421,9 +583,20 @@ export default function LockPage() {
                     {parseFloat(amount || "0").toFixed(2)} GEN
                   </span>
                 </div>
-                <button 
+                <button
+                  type="button"
                   onClick={() => setIsModalOpen(true)}
-                  disabled={!CONTRACT_ADDRESS || !address || address.length !== 42 || !recipient || recipient.length !== 42 || recipient.toLowerCase() === address?.toLowerCase() || !amount || parseFloat(amount) <= 0}
+                  disabled={
+                    !CONTRACT_ADDRESS ||
+                    !address ||
+                    address.length !== 42 ||
+                    !recipient ||
+                    recipient.length !== 42 ||
+                    recipient.toLowerCase() === address?.toLowerCase() ||
+                    !amount ||
+                    parseFloat(amount) <= 0 ||
+                    (policy === "SOURCE_LINKED" && (!repoValidation.valid || !tagValidation.valid))
+                  }
                   className="px-space-xl py-space-md bg-primary-container text-on-primary-container hover:bg-primary hover:text-on-primary font-headline-sm text-headline-sm uppercase tracking-tight flex items-center justify-center gap-space-sm transition-all shadow-xl font-bold disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <span>{!CONTRACT_ADDRESS ? "CONTRACT ADDRESS MISSING" : `Review & Lock ${parseFloat(amount || "0").toFixed(2)} test GEN`}</span>
@@ -449,17 +622,21 @@ export default function LockPage() {
                   {expectedEscrowId || "AWAITING COMPLETE INPUTS..."}
                 </div>
                 <span className="font-mono-data-sm text-[11px] text-on-primary mt-2">
-                  Deterministic SHA256 derived from funder, recipient, template, package, semver, dates, amount, and nonce.
+                  Deterministic SHA256 derived from funder, recipient, template, package, semver, {policy === "SOURCE_LINKED" ? "repo, tag, " : ""}dates, amount, and nonce.
                 </span>
               </div>
               <div className="grid grid-cols-2 gap-space-sm pt-space-md bg-on-primary-container/10 p-space-sm">
                 <div className="flex flex-col">
-                  <span className="font-mono-label-xs text-mono-label-xs uppercase text-on-primary">SETTLEMENT SLA</span>
-                  <span className="font-mono-metric-md text-mono-metric-md font-bold text-on-primary-container">Sub-second</span>
+                  <span className="font-mono-label-xs text-mono-label-xs uppercase text-on-primary">SETTLEMENT POLICY</span>
+                  <span className="font-mono-data-sm text-[11px] font-bold text-on-primary-container uppercase">
+                    {policy === "SOURCE_LINKED" ? "Source-Linked v2" : "Registry v1"}
+                  </span>
                 </div>
                 <div className="flex flex-col">
                   <span className="font-mono-label-xs text-mono-label-xs uppercase text-on-primary">VERIFICATION</span>
-                  <span className="font-mono-metric-md text-mono-metric-md font-bold text-on-primary-container">Deterministic</span>
+                  <span className="font-mono-metric-md text-mono-metric-md font-bold text-on-primary-container">
+                    {policy === "SOURCE_LINKED" ? "Dual-source consensus" : "Validator consensus"}
+                  </span>
                 </div>
               </div>
             </div>
@@ -476,6 +653,12 @@ export default function LockPage() {
 
               <div className="flex flex-col gap-1 font-mono-data-sm text-mono-data-sm">
                 <div className="flex items-center justify-between p-space-xs bg-surface-container">
+                  <span className="text-on-surface-variant">Policy</span>
+                  <span className="text-primary-fixed font-semibold">
+                    {policy === "SOURCE_LINKED" ? "SOURCE_LINKED (v2)" : "REGISTRY_ONLY (v1)"}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between p-space-xs bg-surface-container">
                   <span className="text-on-surface-variant">Oracle Registry Host</span>
                   <span className="text-on-surface font-semibold">{template === 'PYPI' ? 'pypi.org' : 'registry.npmjs.org'}</span>
                 </div>
@@ -487,6 +670,18 @@ export default function LockPage() {
                   <span className="text-on-surface-variant">Exact Semver</span>
                   <span className="text-primary-fixed font-semibold">{ver || "0.0.1"}</span>
                 </div>
+                {policy === "SOURCE_LINKED" && (
+                  <>
+                    <div className="flex items-center justify-between p-space-xs bg-surface-container">
+                      <span className="text-on-surface-variant">Expected GitHub Repo</span>
+                      <span className="text-primary-fixed font-semibold truncate max-w-[180px]">{repoValidation.normalized || "required"}</span>
+                    </div>
+                    <div className="flex items-center justify-between p-space-xs bg-surface-container">
+                      <span className="text-on-surface-variant">Expected Release Tag</span>
+                      <span className="text-primary-fixed font-semibold truncate max-w-[180px]">{expectedTag.trim() || "required"}</span>
+                    </div>
+                  </>
+                )}
                 <div className="flex items-center justify-between p-space-xs bg-surface-container">
                   <span className="text-on-surface-variant">Evaluation Window</span>
                   <span className="text-on-surface">48 Hours (2.0 Days)</span>
@@ -501,7 +696,11 @@ export default function LockPage() {
                 <span className="material-symbols-outlined text-primary-fixed text-[20px]">verified_user</span>
                 <div className="flex flex-col">
                   <span className="font-headline-sm text-[12px] uppercase text-primary">Intelligent Contract Execution</span>
-                  <span className="font-mono-data-sm text-[11px] text-on-surface-variant">Zero custody Intelligent Contract on GenLayer Studio Next.</span>
+                  <span className="font-mono-data-sm text-[11px] text-on-surface-variant">
+                    {policy === "SOURCE_LINKED"
+                      ? "Dual-source equivalence consensus across official registry and GitHub release."
+                      : "Zero custody Intelligent Contract on GenLayer Studio Next."}
+                  </span>
                 </div>
               </div>
             </div>
@@ -519,6 +718,7 @@ export default function LockPage() {
                 <h3 className="font-headline-lg text-headline-lg text-primary tracking-tight">Review & Lock Smart Escrow</h3>
               </div>
               <button 
+                type="button"
                 onClick={() => {
                   if (txProgress === "REVIEW" || txProgress === "FAILED" || txProgress === "SUCCESS") {
                     setIsModalOpen(false);
@@ -532,6 +732,12 @@ export default function LockPage() {
             
             <div className="bg-surface-container p-space-md flex flex-col gap-space-xs font-mono-data-sm text-mono-data-sm">
               <div className="flex justify-between text-on-surface-variant pb-1">
+                <span>VERIFICATION POLICY</span>
+                <span className="text-primary-fixed font-bold">
+                  {policy === "SOURCE_LINKED" ? "Source-Linked Verified Release (v2)" : "Registry Release (v1)"}
+                </span>
+              </div>
+              <div className="flex justify-between text-on-surface-variant pb-1">
                 <span>REGISTRY</span>
                 <span className="text-on-surface font-semibold">{template === 'PYPI' ? 'PyPI (Python Package Index)' : 'NPM (Node Package Manager)'}</span>
               </div>
@@ -539,6 +745,18 @@ export default function LockPage() {
                 <span>TARGET ARTIFACT</span>
                 <span className="text-primary-fixed font-semibold">{pkg} @ {ver}</span>
               </div>
+              {policy === "SOURCE_LINKED" && (
+                <>
+                  <div className="flex justify-between text-on-surface-variant pb-1">
+                    <span>EXPECTED GITHUB REPO</span>
+                    <span className="text-primary-fixed font-semibold font-mono">{repoValidation.normalized}</span>
+                  </div>
+                  <div className="flex justify-between text-on-surface-variant pb-1">
+                    <span>EXPECTED RELEASE TAG</span>
+                    <span className="text-primary-fixed font-semibold font-mono">{expectedTag.trim()}</span>
+                  </div>
+                </>
+              )}
               <div className="flex justify-between text-on-surface-variant pb-1">
                 <span>BENEFICIARY ADDRESS</span>
                 <span className="text-on-surface font-mono">{recipient || "0x..."}</span>
@@ -564,7 +782,11 @@ export default function LockPage() {
             <div className="p-space-sm bg-surface-container-lowest text-on-surface-variant font-mono-data-sm text-[11px] flex flex-col gap-space-sm">
               <div className="flex items-center gap-space-sm">
                 <span className="material-symbols-outlined text-primary-fixed text-[18px]">info</span>
-                <span>Action will call <code>fund_escrow(template, pkg, ver, recipient, start, end, nonce)</code> on GenLayer Studio Next (61997).</span>
+                <span>
+                  {policy === "SOURCE_LINKED"
+                    ? <span>Action calls <code>fund_verified_escrow(template, pkg, ver, repo, tag, recipient, start, end, nonce)</code> on GenLayer Studio Next (61997).</span>
+                    : <span>Action calls <code>fund_escrow(template, pkg, ver, recipient, start, end, nonce)</code> on GenLayer Studio Next (61997).</span>}
+                </span>
               </div>
               {txProgress !== 'REVIEW' && (
                 <div className="flex flex-col gap-1 mt-2 p-2 bg-surface-dim border border-primary-fixed/20">
@@ -597,6 +819,7 @@ export default function LockPage() {
 
             <div className="flex items-center justify-end gap-space-md">
               <button 
+                type="button"
                 onClick={() => {
                   setIsModalOpen(false);
                   setTxProgress("REVIEW");
@@ -611,6 +834,7 @@ export default function LockPage() {
                 Abort
               </button>
               <button 
+                type="button"
                 onClick={broadcastTransaction}
                 disabled={txProgress !== 'REVIEW' && txProgress !== 'FAILED'}
                 className="px-space-xl py-space-md bg-primary-container text-on-primary-container hover:bg-primary font-headline-sm text-headline-sm uppercase font-bold flex items-center gap-space-xs shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"

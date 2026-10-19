@@ -25,7 +25,9 @@ try {
 import { 
   deriveEscrowId, 
   generateEscrowNonce, 
-  normalizeIsoUtc 
+  normalizeIsoUtc,
+  validateGithubRepo,
+  validateGithubTag,
 } from "../src/lib/escrow";
 import { 
   CONTRACT_ADDRESS, 
@@ -1802,6 +1804,287 @@ describe("ShipLock Phase 2 - Production Contract Integration & Runtime Flow", ()
       assert.equal(capturedParams.fees.messageAllocations.length, 2);
       assert.equal(capturedParams.fees.messageAllocations[0].recipient.toLowerCase(), recipient.toLowerCase());
       assert.equal(capturedParams.fees.messageAllocations[1].recipient.toLowerCase(), funder.toLowerCase());
+    });
+  });
+
+  describe("8. Milestone v2 Source-Linked Verified Release (Frontend Integration)", () => {
+    test("validateGithubRepo strictly checks owner/repo format and boundary conditions", () => {
+      const valid = validateGithubRepo("pallets/flask");
+      assert.equal(valid.valid, true);
+      assert.equal(valid.normalized, "pallets/flask");
+
+      // Valid hyphen, underscore, and dot cases
+      const validChars = validateGithubRepo("my-org-123/my-repo_v1.0.core");
+      assert.equal(validChars.valid, true);
+      assert.equal(validChars.normalized, "my-org-123/my-repo_v1.0.core");
+
+      // Length boundaries: 127 and 128 valid, 129 invalid
+      const repo127 = "a".repeat(38) + "/" + "b".repeat(88); // 38 + 1 + 88 = 127
+      assert.equal(repo127.length, 127);
+      assert.equal(validateGithubRepo(repo127).valid, true);
+
+      const repo128 = "a".repeat(38) + "/" + "b".repeat(89); // 38 + 1 + 89 = 128
+      assert.equal(repo128.length, 128);
+      assert.equal(validateGithubRepo(repo128).valid, true);
+
+      const repo129 = "a".repeat(38) + "/" + "b".repeat(90); // 38 + 1 + 90 = 129
+      assert.equal(repo129.length, 129);
+      assert.equal(validateGithubRepo(repo129).valid, false);
+
+      // Trailing .git strictly rejected
+      assert.equal(validateGithubRepo("pallets/flask.git").valid, false);
+      assert.equal(validateGithubRepo("owner/repo.git").valid, false);
+
+      // Unicode letters rejected
+      assert.equal(validateGithubRepo("octocat/héllo-world").valid, false);
+      assert.equal(validateGithubRepo("öwner/repo").valid, false);
+      assert.equal(validateGithubRepo("owner/rëpo").valid, false);
+
+      // Extra slashes rejected
+      assert.equal(validateGithubRepo("pallets/flask/extra").valid, false);
+      assert.equal(validateGithubRepo("/pallets/flask").valid, false);
+      assert.equal(validateGithubRepo("pallets/flask/").valid, false);
+
+      // Whitespace and control characters rejected
+      assert.equal(validateGithubRepo("").valid, false);
+      assert.equal(validateGithubRepo("   ").valid, false);
+      assert.equal(validateGithubRepo(" pallets/flask").valid, false);
+      assert.equal(validateGithubRepo("pallets/flask ").valid, false);
+      assert.equal(validateGithubRepo("pallets/ flask").valid, false);
+      assert.equal(validateGithubRepo("pallets/flask\0evil").valid, false);
+      assert.equal(validateGithubRepo("pallets/flask\n").valid, false);
+      assert.equal(validateGithubRepo("pallets/flask\t").valid, false);
+
+      // Traversal, URLs, and forbidden characters rejected
+      assert.equal(validateGithubRepo("pallets").valid, false);
+      assert.equal(validateGithubRepo("https://github.com/pallets/flask").valid, false);
+      assert.equal(validateGithubRepo("../pallets/flask").valid, false);
+      assert.equal(validateGithubRepo("pallets/../flask").valid, false);
+      assert.equal(validateGithubRepo("pallets/flask?query=1").valid, false);
+      assert.equal(validateGithubRepo("pallets/flask#tag").valid, false);
+    });
+
+    test("validateGithubTag strictly checks release tag syntax and boundary conditions", () => {
+      // Valid tags
+      assert.equal(validateGithubTag("v1.0.0").valid, true);
+      assert.equal(validateGithubTag("3.2.1").valid, true);
+      assert.equal(validateGithubTag("release-2026.10").valid, true);
+
+      // Valid hyphen, underscore, and dot cases
+      assert.equal(validateGithubTag("v1.0.0-rc_1.patch").valid, true);
+      assert.equal(validateGithubTag("release-2026.10_build.1").valid, true);
+
+      // Length boundaries: 127 and 128 valid, 129 invalid
+      const tag127 = "v" + "a".repeat(126); // 127 chars
+      assert.equal(tag127.length, 127);
+      assert.equal(validateGithubTag(tag127).valid, true);
+
+      const tag128 = "v" + "a".repeat(127); // 128 chars
+      assert.equal(tag128.length, 128);
+      assert.equal(validateGithubTag(tag128).valid, true);
+
+      const tag129 = "v" + "a".repeat(128); // 129 chars
+      assert.equal(tag129.length, 129);
+      assert.equal(validateGithubTag(tag129).valid, false);
+
+      // Unicode letters rejected
+      assert.equal(validateGithubTag("v1.0.0-β").valid, false);
+      assert.equal(validateGithubTag("v1.0.0-ü").valid, false);
+      assert.equal(validateGithubTag("tag-日本語").valid, false);
+
+      // Extra slashes rejected
+      assert.equal(validateGithubTag("v1.0/extra").valid, false);
+      assert.equal(validateGithubTag("/v1.0.0").valid, false);
+      assert.equal(validateGithubTag("v1.0.0/").valid, false);
+
+      // Whitespace and control characters rejected
+      assert.equal(validateGithubTag("").valid, false);
+      assert.equal(validateGithubTag("   ").valid, false);
+      assert.equal(validateGithubTag(" v1.0.0").valid, false);
+      assert.equal(validateGithubTag("v1.0.0 ").valid, false);
+      assert.equal(validateGithubTag("v1 0").valid, false);
+      assert.equal(validateGithubTag("v1.0.0\t").valid, false);
+      assert.equal(validateGithubTag("v1.0.0\n").valid, false);
+      assert.equal(validateGithubTag("v1\x1f").valid, false);
+
+      // Forbidden git ref characters & injection attempts rejected
+      assert.equal(validateGithubTag("v1..0").valid, false);
+      assert.equal(validateGithubTag("v1.0~1").valid, false);
+      assert.equal(validateGithubTag("v1.0^1").valid, false);
+      assert.equal(validateGithubTag("v1.0:tag").valid, false);
+      assert.equal(validateGithubTag("v1.0?x").valid, false);
+      assert.equal(validateGithubTag("v1.0#x").valid, false);
+      assert.equal(validateGithubTag("v1.0*x").valid, false);
+      assert.equal(validateGithubTag("v1.0[x]").valid, false);
+      assert.equal(validateGithubTag("v1.0@{1}").valid, false);
+      assert.equal(validateGithubTag("v1.0\\x").valid, false);
+      assert.equal(validateGithubTag("v1.0.0.").valid, false);
+      assert.equal(validateGithubTag("v1.0.lock").valid, false);
+    });
+
+    test("deriveEscrowId binds expected repository and tag into preimage for SOURCE_LINKED escrows", () => {
+      const baseInputs = {
+        funder: "0x1111111111111111111111111111111111111111",
+        recipient: "0x2222222222222222222222222222222222222222",
+        template: "PYPI_VERSION",
+        packageName: "flask",
+        version: "3.0.0",
+        windowStartUtc: "2026-10-15T00:00:00Z",
+        windowEndUtc: "2026-10-17T00:00:00Z",
+        amountWei: 1000000000000000000n,
+        nonce: 42n,
+      };
+
+      const regularId = deriveEscrowId({
+        ...baseInputs,
+        policy: "REGISTRY_ONLY",
+      });
+
+      const verifiedId1 = deriveEscrowId({
+        ...baseInputs,
+        policy: "SOURCE_LINKED",
+        expectedRepo: "pallets/flask",
+        expectedTag: "v3.0.0",
+      });
+
+      const verifiedId2 = deriveEscrowId({
+        ...baseInputs,
+        policy: "SOURCE_LINKED",
+        expectedRepo: "pallets/flask",
+        expectedTag: "3.0.0", // different tag
+      });
+
+      const verifiedId3 = deriveEscrowId({
+        ...baseInputs,
+        policy: "SOURCE_LINKED",
+        expectedRepo: "other/flask", // different repo
+        expectedTag: "v3.0.0",
+      });
+
+      assert.match(verifiedId1, /^0x[0-9a-f]{64}$/);
+      assert.notEqual(verifiedId1, regularId, "SOURCE_LINKED escrow ID must differ from REGISTRY_ONLY");
+      assert.notEqual(verifiedId1, verifiedId2, "Differing tag must alter the escrow ID");
+      assert.notEqual(verifiedId1, verifiedId3, "Differing repo must alter the escrow ID");
+
+      // Verify deterministic repeatability
+      const verifiedId1Repeat = deriveEscrowId({
+        ...baseInputs,
+        policy: "SOURCE_LINKED",
+        expectedRepo: "PALLETS/FLASK", // uppercase normalizes to lowercase
+        expectedTag: "v3.0.0",
+      });
+      assert.equal(verifiedId1, verifiedId1Repeat, "Repo normalization must guarantee deterministic derivation");
+    });
+
+    test("fee-profile.json configures fund_verified_escrow strictly within [30, 600] timeout bounds", () => {
+      const feeProfilePath = path.resolve(__dirname, "../src/fee-profile.json");
+      const profile = JSON.parse(fs.readFileSync(feeProfilePath, "utf-8"));
+      const config = profile.methods["fund_verified_escrow"];
+
+      assert.ok(config, "fund_verified_escrow must be defined in fee-profile.json");
+      assert.equal(config.leaderTimeunitsAllocation, "200");
+      assert.equal(config.validatorTimeunitsAllocation, "400");
+
+      // Validate through write.ts validation function
+      validatePhaseAllocations(config);
+    });
+
+    test("verifyCreatedEscrow verifies on-chain SOURCE_LINKED escrow audit fields", async () => {
+      const expectedId = "0x" + "a".repeat(64);
+      const funder = "0x1111111111111111111111111111111111111111";
+      const recipient = "0x2222222222222222222222222222222222222222";
+
+      const mockOnChainEscrow = {
+        id: expectedId,
+        funder,
+        recipient,
+        template: "PYPI_VERSION",
+        package_name: "flask",
+        version: "3.0.0",
+        policy: "SOURCE_LINKED",
+        expected_repo: "pallets/flask",
+        expected_tag: "v3.0.0",
+        status: "OPEN",
+        amount: "1000000000000000000",
+        nonce: "42",
+      };
+
+      const mockClient = {
+        readContract: async ({ functionName, args }: any) => {
+          if (functionName === "get_escrow" && args[0] === expectedId) {
+            return mockOnChainEscrow;
+          }
+          throw new Error("not found");
+        },
+      };
+
+      // Successful verification
+      await verifyCreatedEscrow({
+        client: mockClient as any,
+        contractAddress: CONTRACT_ADDRESS,
+        expectedId,
+        returnedId: expectedId,
+        funder,
+        recipient,
+        template: "PYPI_VERSION",
+        packageName: "flask",
+        version: "3.0.0",
+        amountWei: 1000000000000000000n,
+        nonce: 42n,
+        policy: "SOURCE_LINKED",
+        expectedRepo: "pallets/flask",
+        expectedTag: "v3.0.0",
+        maxAttempts: 2,
+        intervalMs: 10,
+      });
+
+      // Verification fails if policy mismatches on-chain
+      await assert.rejects(
+        async () => {
+          await verifyCreatedEscrow({
+            client: mockClient as any,
+            contractAddress: CONTRACT_ADDRESS,
+            expectedId,
+            returnedId: expectedId,
+            funder,
+            recipient,
+            template: "PYPI_VERSION",
+            packageName: "flask",
+            version: "3.0.0",
+            amountWei: 1000000000000000000n,
+            nonce: 42n,
+            policy: "REGISTRY_ONLY", // mismatched policy
+            maxAttempts: 1,
+            intervalMs: 10,
+          });
+        },
+        /Escrow verification failed/
+      );
+
+      // Verification fails if expected_repo mismatches on-chain
+      await assert.rejects(
+        async () => {
+          await verifyCreatedEscrow({
+            client: mockClient as any,
+            contractAddress: CONTRACT_ADDRESS,
+            expectedId,
+            returnedId: expectedId,
+            funder,
+            recipient,
+            template: "PYPI_VERSION",
+            packageName: "flask",
+            version: "3.0.0",
+            amountWei: 1000000000000000000n,
+            nonce: 42n,
+            policy: "SOURCE_LINKED",
+            expectedRepo: "other/flask", // mismatched repo
+            expectedTag: "v3.0.0",
+            maxAttempts: 1,
+            intervalMs: 10,
+          });
+        },
+        /Escrow verification failed/
+      );
     });
   });
 });

@@ -199,7 +199,7 @@ def test_unexpected_http_statuses_leave_open_before_and_after_window(base_contra
 
     # 2. After window_end (2026-03-12): unexpected statuses must NOT trigger REFUND_NOHIT
     direct_vm.warp("2026-03-12T00:00:00Z")
-    
+
     # 429 after window -> remains OPEN
     mock_registry(direct_vm, "Rate limit", status=429)
     base_contract.release(id_hash)
@@ -734,7 +734,7 @@ def test_expire_before_grace_reverts_after_grace_refunds(base_contract, direct_v
     direct_vm.warp("2026-03-15T00:00:00Z")
     with pytest.raises(Exception, match="now >= expire_at violated"):
         base_contract.expire(id_hash)
-        
+
     direct_vm.warp("2026-03-18T00:00:00Z")
     emit_spy.clear()
     base_contract.expire(id_hash)
@@ -1198,4 +1198,593 @@ def test_npm_missing_or_malformed_versions_or_time_maps_cannot_fund_or_refund(ba
     assert eco["escrowed_open"] == amount
     assert eco["paid_to_recipients"] == 0
     assert eco["refunded_to_funders"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Verified Escrow (Source-Linked) Tests
+# ---------------------------------------------------------------------------
+
+def fund_verified(contract, direct_vm, recipient, window_start, window_end, amount, template=PYPI, pkg=PKG, ver=VER, expected_repo="shiplock-org/shiplock-core", expected_tag="v1.0.0", nonce=0):
+    direct_vm.value = amount
+    id_hash = contract.fund_verified_escrow(template, pkg, ver, expected_repo, expected_tag, recipient, window_start, window_end, nonce)
+    direct_vm.value = 0
+    return id_hash
+
+
+def test_verified_escrow_input_validation_and_rejections(base_contract, direct_vm, direct_bob):
+    direct_vm.warp("2026-01-01T00:00:00Z")
+    start = "2026-03-01T00:00:00Z"
+    end = "2026-03-10T00:00:00Z"
+    amount = 10 * WEI
+
+    # Valid repo lookback mock
+    mock_registry(direct_vm, load_fix("pypi_404.json"), status=404)
+
+    # Repository traversal rejected
+    with pytest.raises(Exception, match=r"(path traversal|format)"):
+        fund_verified(base_contract, direct_vm, direct_bob, start, end, amount, expected_repo="owner/../repo")
+
+    # Scheme rejected
+    with pytest.raises(Exception, match=r"(scheme|format|forbidden character)"):
+        fund_verified(base_contract, direct_vm, direct_bob, start, end, amount, expected_repo="https://github.com/owner/repo")
+
+    # Query string rejected
+    with pytest.raises(Exception, match=r"(forbidden character|format)"):
+        fund_verified(base_contract, direct_vm, direct_bob, start, end, amount, expected_repo="owner/repo?ref=main")
+
+    # Fragment rejected
+    with pytest.raises(Exception, match=r"(forbidden character|format)"):
+        fund_verified(base_contract, direct_vm, direct_bob, start, end, amount, expected_repo="owner/repo#section")
+
+    # Whitespace rejected
+    with pytest.raises(Exception, match=r"(whitespace|format)"):
+        fund_verified(base_contract, direct_vm, direct_bob, start, end, amount, expected_repo=" owner/repo ")
+
+    # Control chars / newline rejected
+    with pytest.raises(Exception, match=r"(control character|whitespace|format)"):
+        fund_verified(base_contract, direct_vm, direct_bob, start, end, amount, expected_repo="owner/repo\n")
+
+    # Trailing .git rejected
+    with pytest.raises(Exception, match=r"(\.git|repo|syntax)"):
+        fund_verified(base_contract, direct_vm, direct_bob, start, end, amount, expected_repo="pallets/flask.git")
+    with pytest.raises(Exception, match=r"(\.git|repo|syntax)"):
+        fund_verified(base_contract, direct_vm, direct_bob, start, end, amount, expected_repo="owner/repo.git")
+
+    # Unicode letters rejected in repo
+    with pytest.raises(Exception, match=r"(non-ASCII|whitespace|control character|invalid character)"):
+        fund_verified(base_contract, direct_vm, direct_bob, start, end, amount, expected_repo="octocat/héllo-world")
+    with pytest.raises(Exception, match=r"(non-ASCII|whitespace|control character|invalid character)"):
+        fund_verified(base_contract, direct_vm, direct_bob, start, end, amount, expected_repo="öwner/repo")
+
+    # Single segment rejected
+    with pytest.raises(Exception, match=r"(owner/repo format|format)"):
+        fund_verified(base_contract, direct_vm, direct_bob, start, end, amount, expected_repo="owner")
+
+    # Three segments rejected (extra slash)
+    with pytest.raises(Exception, match=r"(owner/repo format|format)"):
+        fund_verified(base_contract, direct_vm, direct_bob, start, end, amount, expected_repo="owner/repo/extra")
+    with pytest.raises(Exception, match=r"(owner/repo format|format)"):
+        fund_verified(base_contract, direct_vm, direct_bob, start, end, amount, expected_repo="/owner/repo")
+    with pytest.raises(Exception, match=r"(owner/repo format|format)"):
+        fund_verified(base_contract, direct_vm, direct_bob, start, end, amount, expected_repo="owner/repo/")
+
+    # Repo length boundaries: 127 and 128 valid, 129 rejected
+    repo_127 = "a" * 38 + "/" + "b" * 88 # len 127
+    assert len(repo_127) == 127
+    id_127 = fund_verified(base_contract, direct_vm, direct_bob, start, end, amount, expected_repo=repo_127, nonce=901)
+    assert base_contract.get_escrow(id_127)["status"] == "OPEN"
+
+    repo_128 = "a" * 38 + "/" + "b" * 89 # len 128
+    assert len(repo_128) == 128
+    id_128 = fund_verified(base_contract, direct_vm, direct_bob, start, end, amount, expected_repo=repo_128, nonce=902)
+    assert base_contract.get_escrow(id_128)["status"] == "OPEN"
+
+    repo_129 = "a" * 38 + "/" + "b" * 90 # len 129
+    assert len(repo_129) == 129
+    with pytest.raises(Exception, match=r"(length|bounds|format)"):
+        fund_verified(base_contract, direct_vm, direct_bob, start, end, amount, expected_repo=repo_129)
+
+    # Valid hyphen, underscore, and dot cases in repo
+    id_chars = fund_verified(base_contract, direct_vm, direct_bob, start, end, amount, expected_repo="my-org-123/my-repo_v1.0.core", nonce=903)
+    assert base_contract.get_escrow(id_chars)["status"] == "OPEN"
+
+    # Tag validation: slashes rejected
+    with pytest.raises(Exception, match=r"(separator|tag|forbidden character)"):
+        fund_verified(base_contract, direct_vm, direct_bob, start, end, amount, expected_tag="release/v1.0.0")
+
+    # Tag traversal rejected
+    with pytest.raises(Exception, match=r"(\.\.|tag)"):
+        fund_verified(base_contract, direct_vm, direct_bob, start, end, amount, expected_tag="../v1.0")
+
+    # Tag whitespace rejected
+    with pytest.raises(Exception, match=r"(whitespace|tag)"):
+        fund_verified(base_contract, direct_vm, direct_bob, start, end, amount, expected_tag=" v1.0.0 ")
+    with pytest.raises(Exception, match=r"(whitespace|tag)"):
+        fund_verified(base_contract, direct_vm, direct_bob, start, end, amount, expected_tag="v1 0")
+
+    # Tag control chars rejected
+    with pytest.raises(Exception, match=r"(control character|whitespace|tag)"):
+        fund_verified(base_contract, direct_vm, direct_bob, start, end, amount, expected_tag="v1.0.0\t")
+    with pytest.raises(Exception, match=r"(control character|whitespace|tag)"):
+        fund_verified(base_contract, direct_vm, direct_bob, start, end, amount, expected_tag="v1.0.0\n")
+
+    # Unicode letters rejected in tag
+    with pytest.raises(Exception, match=r"(non-ASCII|whitespace|control character|forbidden character)"):
+        fund_verified(base_contract, direct_vm, direct_bob, start, end, amount, expected_tag="v1.0.0-β")
+    with pytest.raises(Exception, match=r"(non-ASCII|whitespace|control character|forbidden character)"):
+        fund_verified(base_contract, direct_vm, direct_bob, start, end, amount, expected_tag="v1.0.0-ü")
+
+    # Tag length boundaries: 127 and 128 valid, 129 rejected
+    tag_127 = "v" * 127
+    id_tag_127 = fund_verified(base_contract, direct_vm, direct_bob, start, end, amount, expected_tag=tag_127, nonce=904)
+    assert base_contract.get_escrow(id_tag_127)["status"] == "OPEN"
+
+    tag_128 = "v" * 128
+    id_tag_128 = fund_verified(base_contract, direct_vm, direct_bob, start, end, amount, expected_tag=tag_128, nonce=905)
+    assert base_contract.get_escrow(id_tag_128)["status"] == "OPEN"
+
+    tag_129 = "v" * 129
+    with pytest.raises(Exception, match=r"(length|bounds|tag)"):
+        fund_verified(base_contract, direct_vm, direct_bob, start, end, amount, expected_tag=tag_129)
+
+    # Valid hyphen, underscore, and dot cases in tag
+    id_tag_chars = fund_verified(base_contract, direct_vm, direct_bob, start, end, amount, expected_tag="v1.0.0-rc_1.patch", nonce=906)
+    assert base_contract.get_escrow(id_tag_chars)["status"] == "OPEN"
+
+
+def test_verified_escrow_deterministic_id_and_audit_fields(base_contract, direct_vm, direct_alice, direct_bob):
+    direct_vm.warp("2026-01-01T00:00:00Z")
+    start = "2026-03-01T00:00:00Z"
+    end = "2026-03-10T00:00:00Z"
+    amount = 15 * WEI
+    repo = "shiplock-org/shiplock-core"
+    tag = "v1.0.0"
+    nonce = 77
+
+    mock_registry(direct_vm, load_fix("pypi_404.json"), status=404)
+
+    funder_hex = addr_hex(direct_alice)
+    payee_hex = addr_hex(direct_bob)
+    preimage = f"{funder_hex}|{payee_hex}|{PYPI}|{PKG}|{VER}|{repo}|{tag}|{start}|{end}|{amount}|{nonce}".encode("utf-8")
+    expected_id = "0x" + hashlib.sha256(preimage).hexdigest()
+
+    id_hash = fund_verified(base_contract, direct_vm, direct_bob, start, end, amount, expected_repo=repo, expected_tag=tag, nonce=nonce)
+    assert id_hash == expected_id
+
+    escrow = base_contract.get_escrow(id_hash)
+    assert escrow["policy"] == "SOURCE_LINKED"
+    assert escrow["expected_repo"] == repo
+    assert escrow["expected_tag"] == tag
+    assert escrow["package_name"] == PKG
+    assert escrow["package"] == PKG
+    assert escrow["version"] == VER
+    assert addr_hex(escrow["recipient"]) == addr_hex(direct_bob)
+    assert addr_hex(escrow["funder"]) == addr_hex(direct_alice)
+    assert escrow["status"] == "OPEN"
+    assert escrow["registry_evidence"] == ""
+    assert escrow["github_evidence"] == ""
+    assert escrow["match_reason"] == "LOOKBACK_404_OK"
+
+
+def test_npm_verified_release_success(base_contract, direct_vm, direct_alice, direct_bob, emit_spy):
+    """Full end-to-end verified release for an npm package with valid repo and tag."""
+    direct_vm.warp("2026-01-01T00:00:00Z")
+    start = "2026-03-01T00:00:00Z"
+    end = "2026-03-10T00:00:00Z"
+    amount = 25 * WEI
+    pkg = "verified-npm-pkg"
+    ver = "1.0.0"
+    repo = "shiplock-org/shiplock-core"
+    tag = "v1.0.0"
+
+    # 1. Lookback at fund time
+    mock_registry(direct_vm, json.dumps({"name": pkg, "versions": {}, "time": {}}), status=200)
+    id_hash = fund_verified(base_contract, direct_vm, direct_bob, start, end, amount, template=NPM, pkg=pkg, ver=ver, expected_repo=repo, expected_tag=tag, nonce=101)
+
+    # 2. Warp to active window
+    direct_vm.warp("2026-03-03T12:00:00Z")
+    direct_vm.sender = direct_bob
+    emit_spy.clear()
+
+    npm_body = json.dumps({
+        "name": pkg,
+        "versions": {
+            ver: {
+                "name": pkg,
+                "version": ver,
+                "repository": {
+                    "type": "git",
+                    "url": "git+https://github.com/shiplock-org/shiplock-core.git"
+                }
+            }
+        },
+        "time": {
+            ver: "2026-03-02T15:00:00Z"
+        }
+    })
+
+    gh_body = json.dumps({
+        "tag_name": tag,
+        "published_at": "2026-03-02T14:30:00Z",
+        "draft": False,
+        "prerelease": False
+    })
+
+    mock_registry(direct_vm, {
+        r"registry\.npmjs\.org": (npm_body, 200),
+        r"api\.github\.com": (gh_body, 200)
+    })
+
+    base_contract.release(id_hash)
+
+    escrow = base_contract.get_escrow(id_hash)
+    assert escrow["status"] == "RELEASED"
+    assert escrow["match_reason"] == "VERIFIED_RELEASE"
+    assert escrow["policy"] == "SOURCE_LINKED"
+    assert len(emit_spy.emits) == 1
+    assert addr_hex(emit_spy.emits[0][0]) == addr_hex(direct_bob)
+    assert emit_spy.emits[0][1] == amount
+
+    # Audit evidence fields populated
+    reg_ev = json.loads(escrow["registry_evidence"])
+    assert reg_ev["kind"] == "200"
+    assert reg_ev["repository"] == "shiplock-org/shiplock-core"
+    assert reg_ev["publish_time"] == "2026-03-02T15:00:00Z"
+
+    gh_ev = json.loads(escrow["github_evidence"])
+    assert gh_ev["kind"] == "200"
+    assert gh_ev["tag_name"] == tag
+    assert gh_ev["published_at"] == "2026-03-02T14:30:00Z"
+
+    eco = base_contract.get_economics()
+    assert eco["escrowed_open"] == 0
+    assert eco["paid_to_recipients"] == amount
+    assert eco["refunded_to_funders"] == 0
+
+
+def test_pypi_verified_release_success(base_contract, direct_vm, direct_alice, direct_bob, emit_spy):
+    """Full end-to-end verified release for a PyPI package with valid project_urls and tag."""
+    direct_vm.warp("2026-01-01T00:00:00Z")
+    start = "2026-03-01T00:00:00Z"
+    end = "2026-03-10T00:00:00Z"
+    amount = 30 * WEI
+    repo = "shiplock-org/shiplock-core"
+    tag = "v1.0.0"
+
+    mock_registry(direct_vm, load_fix("pypi_404.json"), status=404)
+    id_hash = fund_verified(base_contract, direct_vm, direct_bob, start, end, amount, template=PYPI, pkg=PKG, ver=VER, expected_repo=repo, expected_tag=tag, nonce=102)
+
+    direct_vm.warp("2026-03-04T00:00:00Z")
+    direct_vm.sender = direct_bob
+    emit_spy.clear()
+
+    pypi_body = json.dumps({
+        "info": {
+            "name": PKG,
+            "version": VER,
+            "yanked": False,
+            "project_urls": {
+                "Source Code": "https://github.com/shiplock-org/shiplock-core"
+            }
+        },
+        "urls": [
+            {
+                "filename": f"{PKG}-{VER}.tar.gz",
+                "upload_time_iso_8601": "2026-03-02T10:00:00Z",
+                "yanked": False
+            }
+        ]
+    })
+
+    gh_body = json.dumps({
+        "tag_name": tag,
+        "published_at": "2026-03-02T09:00:00Z",
+        "draft": False,
+        "prerelease": False
+    })
+
+    mock_registry(direct_vm, {
+        r"pypi\.org": (pypi_body, 200),
+        r"api\.github\.com": (gh_body, 200)
+    })
+
+    base_contract.release(id_hash)
+
+    escrow = base_contract.get_escrow(id_hash)
+    assert escrow["status"] == "RELEASED"
+    assert escrow["match_reason"] == "VERIFIED_RELEASE"
+    assert len(emit_spy.emits) == 1
+    assert addr_hex(emit_spy.emits[0][0]) == addr_hex(direct_bob)
+    assert emit_spy.emits[0][1] == amount
+
+
+def test_verified_escrow_active_window_mismatches_stay_open(base_contract, direct_vm, direct_bob, emit_spy):
+    """During active window, repo mismatch or tag mismatch leaves escrow OPEN and retryable."""
+    direct_vm.warp("2026-01-01T00:00:00Z")
+    start = "2026-03-01T00:00:00Z"
+    end = "2026-03-10T00:00:00Z"
+    amount = 20 * WEI
+    repo = "shiplock-org/shiplock-core"
+    tag = "v1.0.0"
+
+    mock_registry(direct_vm, load_fix("pypi_404.json"), status=404)
+    id_hash = fund_verified(base_contract, direct_vm, direct_bob, start, end, amount, template=PYPI, pkg=PKG, ver=VER, expected_repo=repo, expected_tag=tag, nonce=103)
+
+    direct_vm.warp("2026-03-05T00:00:00Z")
+    direct_vm.sender = direct_bob
+
+    # 1. PyPI points to wrong repo
+    wrong_repo_pypi = json.dumps({
+        "info": {
+            "name": PKG,
+            "version": VER,
+            "yanked": False,
+            "project_urls": {"Homepage": "https://github.com/imposter-org/wrong-repo"}
+        },
+        "urls": [{"upload_time_iso_8601": "2026-03-02T10:00:00Z", "yanked": False}]
+    })
+    gh_body = json.dumps({"tag_name": tag, "published_at": "2026-03-02T09:00:00Z", "draft": False, "prerelease": False})
+
+    emit_spy.clear()
+    mock_registry(direct_vm, {r"pypi\.org": (wrong_repo_pypi, 200), r"api\.github\.com": (gh_body, 200)})
+    base_contract.release(id_hash)
+
+    escrow = base_contract.get_escrow(id_hash)
+    assert escrow["status"] == "OPEN"
+    assert escrow["match_reason"] == "EARLY_REGISTRY_MISMATCH_RETRYABLE"
+    assert len(emit_spy.emits) == 0
+
+    # 2. PyPI has correct repo, but GitHub returns different tag
+    correct_pypi = json.dumps({
+        "info": {
+            "name": PKG,
+            "version": VER,
+            "yanked": False,
+            "project_urls": {"Source": f"https://github.com/{repo}"}
+        },
+        "urls": [{"upload_time_iso_8601": "2026-03-02T10:00:00Z", "yanked": False}]
+    })
+    wrong_tag_gh = json.dumps({"tag_name": "v2.0.0-rc1", "published_at": "2026-03-02T09:00:00Z", "draft": False, "prerelease": False})
+
+    mock_registry(direct_vm, {r"pypi\.org": (correct_pypi, 200), r"api\.github\.com": (wrong_tag_gh, 200)})
+    base_contract.release(id_hash)
+
+    escrow = base_contract.get_escrow(id_hash)
+    assert escrow["status"] == "OPEN"
+    assert escrow["match_reason"] == "EARLY_GITHUB_TAG_MISMATCH_RETRYABLE"
+    assert len(emit_spy.emits) == 0
+
+
+def test_verified_escrow_active_window_failures_and_transport_stay_open(base_contract, direct_vm, direct_bob, emit_spy):
+    """During active window, GitHub 404, 403, 429, 500, or invalid JSON leaves escrow OPEN."""
+    direct_vm.warp("2026-01-01T00:00:00Z")
+    start = "2026-03-01T00:00:00Z"
+    end = "2026-03-10T00:00:00Z"
+    amount = 20 * WEI
+    repo = "shiplock-org/shiplock-core"
+    tag = "v1.0.0"
+
+    mock_registry(direct_vm, load_fix("pypi_404.json"), status=404)
+    id_hash = fund_verified(base_contract, direct_vm, direct_bob, start, end, amount, template=PYPI, pkg=PKG, ver=VER, expected_repo=repo, expected_tag=tag, nonce=104)
+
+    direct_vm.warp("2026-03-05T00:00:00Z")
+    direct_vm.sender = direct_bob
+
+    correct_pypi = json.dumps({
+        "info": {
+            "name": PKG,
+            "version": VER,
+            "yanked": False,
+            "project_urls": {"Source": f"https://github.com/{repo}"}
+        },
+        "urls": [{"upload_time_iso_8601": "2026-03-02T10:00:00Z", "yanked": False}]
+    })
+
+    # GitHub 404
+    mock_registry(direct_vm, {r"pypi\.org": (correct_pypi, 200), r"api\.github\.com": ("Not Found", 404)})
+    base_contract.release(id_hash)
+    escrow = base_contract.get_escrow(id_hash)
+    assert escrow["status"] == "OPEN"
+    assert escrow["match_reason"] == "EARLY_GITHUB_404_RETRYABLE"
+
+    # GitHub 403 rate limit / auth
+    mock_registry(direct_vm, {r"pypi\.org": (correct_pypi, 200), r"api\.github\.com": ("Forbidden", 403)})
+    base_contract.release(id_hash)
+    escrow = base_contract.get_escrow(id_hash)
+    assert escrow["status"] == "OPEN"
+    assert escrow["match_reason"] == "EARLY_GITHUB_UNAVAILABLE_RETRYABLE"
+
+    # GitHub 500 server error
+    mock_registry(direct_vm, {r"pypi\.org": (correct_pypi, 200), r"api\.github\.com": ("Server Error", 500)})
+    base_contract.release(id_hash)
+    escrow = base_contract.get_escrow(id_hash)
+    assert escrow["status"] == "OPEN"
+    assert escrow["match_reason"] == "EARLY_GITHUB_UNAVAILABLE_RETRYABLE"
+
+    # GitHub malformed JSON
+    mock_registry(direct_vm, {r"pypi\.org": (correct_pypi, 200), r"api\.github\.com": ("{not json", 200)})
+    base_contract.release(id_hash)
+    escrow = base_contract.get_escrow(id_hash)
+    assert escrow["status"] == "OPEN"
+    assert escrow["match_reason"] == "EARLY_GITHUB_UNAVAILABLE_RETRYABLE"
+
+    # Registry failure + GitHub success
+    gh_body = json.dumps({"tag_name": tag, "published_at": "2026-03-02T09:00:00Z", "draft": False, "prerelease": False})
+    mock_registry(direct_vm, {r"pypi\.org": ("Server Error", 500), r"api\.github\.com": (gh_body, 200)})
+    base_contract.release(id_hash)
+    escrow = base_contract.get_escrow(id_hash)
+    assert escrow["status"] == "OPEN"
+    assert escrow["match_reason"] == "EARLY_REGISTRY_UNAVAILABLE_RETRYABLE"
+    assert len(emit_spy.emits) == 0
+
+
+def test_verified_escrow_post_window_settlement_and_inconclusive_safety(base_contract, direct_vm, direct_alice, direct_bob, emit_spy):
+    """Post-window behavior:
+    1. Conclusive mismatch or absent evidence -> REFUND_NOHIT to funder.
+    2. Transport failure / inconclusive -> remains OPEN to protect both parties."""
+    direct_vm.warp("2026-01-01T00:00:00Z")
+    start = "2026-03-01T00:00:00Z"
+    end = "2026-03-10T00:00:00Z"
+    amount = 20 * WEI
+    repo = "shiplock-org/shiplock-core"
+    tag = "v1.0.0"
+
+    # Escrow 1: Repo mismatch post-window -> REFUND_NOHIT
+    mock_registry(direct_vm, load_fix("pypi_404.json"), status=404)
+    id1 = fund_verified(base_contract, direct_vm, direct_bob, start, end, amount, template=PYPI, pkg=PKG, ver=VER, expected_repo=repo, expected_tag=tag, nonce=105)
+
+    direct_vm.warp("2026-03-12T00:00:00Z")
+    direct_vm.sender = direct_bob
+    emit_spy.clear()
+
+    wrong_repo_pypi = json.dumps({
+        "info": {
+            "name": PKG,
+            "version": VER,
+            "yanked": False,
+            "project_urls": {"Homepage": "https://github.com/other-org/other-repo"}
+        },
+        "urls": [{"upload_time_iso_8601": "2026-03-02T10:00:00Z", "yanked": False}]
+    })
+    gh_body = json.dumps({"tag_name": tag, "published_at": "2026-03-02T09:00:00Z", "draft": False, "prerelease": False})
+
+    mock_registry(direct_vm, {r"pypi\.org": (wrong_repo_pypi, 200), r"api\.github\.com": (gh_body, 200)})
+    base_contract.release(id1)
+
+    escrow1 = base_contract.get_escrow(id1)
+    assert escrow1["status"] == "REFUND_NOHIT"
+    assert escrow1["match_reason"] == "REGISTRY_REPO_MISMATCH"
+    assert len(emit_spy.emits) == 1
+    assert addr_hex(emit_spy.emits[0][0]) == addr_hex(direct_alice)
+    assert emit_spy.emits[0][1] == amount
+
+    # Escrow 2: Post-window GitHub 503 transport failure -> remains OPEN!
+    direct_vm.warp("2026-01-01T00:00:00Z")
+    direct_vm.sender = direct_alice
+    mock_registry(direct_vm, load_fix("pypi_404.json"), status=404)
+    id2 = fund_verified(base_contract, direct_vm, direct_bob, start, end, amount, template=PYPI, pkg=PKG, ver=VER, expected_repo=repo, expected_tag=tag, nonce=106)
+
+    direct_vm.warp("2026-03-12T00:00:00Z")
+    direct_vm.sender = direct_bob
+    emit_spy.clear()
+
+    correct_pypi = json.dumps({
+        "info": {
+            "name": PKG,
+            "version": VER,
+            "yanked": False,
+            "project_urls": {"Source": f"https://github.com/{repo}"}
+        },
+        "urls": [{"upload_time_iso_8601": "2026-03-02T10:00:00Z", "yanked": False}]
+    })
+    mock_registry(direct_vm, {r"pypi\.org": (correct_pypi, 200), r"api\.github\.com": ("Service Unavailable", 503)})
+    base_contract.release(id2)
+
+    escrow2 = base_contract.get_escrow(id2)
+    assert escrow2["status"] == "OPEN"
+    assert escrow2["match_reason"] == "POST_WINDOW_GITHUB_UNAVAILABLE"
+    assert len(emit_spy.emits) == 0
+
+    # Escrow 3: Post-window GitHub tag absent (404) -> REFUND_NOHIT
+    direct_vm.warp("2026-01-01T00:00:00Z")
+    direct_vm.sender = direct_alice
+    mock_registry(direct_vm, load_fix("pypi_404.json"), status=404)
+    id3 = fund_verified(base_contract, direct_vm, direct_bob, start, end, amount, template=PYPI, pkg=PKG, ver=VER, expected_repo=repo, expected_tag=tag, nonce=107)
+
+    direct_vm.warp("2026-03-12T00:00:00Z")
+    direct_vm.sender = direct_bob
+    emit_spy.clear()
+
+    mock_registry(direct_vm, {r"pypi\.org": (correct_pypi, 200), r"api\.github\.com": ("Not Found", 404)})
+    base_contract.release(id3)
+
+    escrow3 = base_contract.get_escrow(id3)
+    assert escrow3["status"] == "REFUND_NOHIT"
+    assert escrow3["match_reason"] == "WINDOW_EXPIRED_GITHUB_NO_RELEASE"
+    assert len(emit_spy.emits) == 1
+    assert addr_hex(emit_spy.emits[0][0]) == addr_hex(direct_alice)
+
+
+def test_verified_escrow_security_and_double_settlement(base_contract, direct_vm, direct_alice, direct_bob, emit_spy):
+    """Preserves:
+    - Funder cannot release their own verified escrow
+    - Double release / double settlement reverts
+    - Expire grace refunds if not settled"""
+    direct_vm.warp("2026-01-01T00:00:00Z")
+    start = "2026-03-01T00:00:00Z"
+    end = "2026-03-10T00:00:00Z"
+    amount = 20 * WEI
+    repo = "shiplock-org/shiplock-core"
+    tag = "v1.0.0"
+
+    mock_registry(direct_vm, load_fix("pypi_404.json"), status=404)
+    id_hash = fund_verified(base_contract, direct_vm, direct_bob, start, end, amount, template=PYPI, pkg=PKG, ver=VER, expected_repo=repo, expected_tag=tag, nonce=108)
+
+    # 1. Funder cannot call release
+    direct_vm.warp("2026-03-04T00:00:00Z")
+    direct_vm.sender = direct_alice
+    with pytest.raises(Exception, match=r"(Funder cannot release|funder)"):
+        base_contract.release(id_hash)
+
+    # 2. Release cleanly by payee
+    direct_vm.sender = direct_bob
+    pypi_body = json.dumps({
+        "info": {"name": PKG, "version": VER, "yanked": False, "project_urls": {"Source": f"https://github.com/{repo}"}},
+        "urls": [{"upload_time_iso_8601": "2026-03-02T10:00:00Z", "yanked": False}]
+    })
+    gh_body = json.dumps({"tag_name": tag, "published_at": "2026-03-02T09:00:00Z", "draft": False, "prerelease": False})
+    mock_registry(direct_vm, {r"pypi\.org": (pypi_body, 200), r"api\.github\.com": (gh_body, 200)})
+
+    base_contract.release(id_hash)
+    assert base_contract.get_escrow(id_hash)["status"] == "RELEASED"
+
+    # 3. Double release reverts
+    with pytest.raises(Exception, match=r"(not OPEN|escrow not open)"):
+        base_contract.release(id_hash)
+
+    # 4. Expire on released escrow reverts
+    direct_vm.warp("2026-04-01T00:00:00Z")
+    with pytest.raises(Exception, match=r"(not OPEN|escrow not open)"):
+        base_contract.expire(id_hash)
+
+
+def test_normalize_github_repo_url_security_regression(base_contract):
+    """Direct contract verification of strict GitHub repo URL normalization grammar."""
+    import sys
+    contract_cls = getattr(base_contract, "_contract", base_contract).__class__
+    mod = sys.modules.get(contract_cls.__module__)
+    if mod is None:
+        for m in sys.modules.values():
+            if getattr(m, "ShipLock", None) == contract_cls or getattr(m, "_normalize_github_repo_url", None) is not None:
+                mod = m
+                break
+    assert mod is not None, "Could not find ShipLock module in sys.modules"
+    normalize = getattr(mod, "_normalize_github_repo_url")
+
+    # Must reject:
+    must_reject = [
+        "https://evil.example/github.com/owner/repo",
+        "https://notgithub.com/owner/repo",
+        "git@evilgithub.com:owner/repo",
+        "https://github.com.evil/owner/repo",
+        "https://github.com/owner/repo/issues",
+        "https://github.com/owner/repo/tree/main",
+        "github://owner/repo",
+        "https://github.com:443/owner/repo",
+    ]
+    for url in must_reject:
+        assert normalize(url) == "", f"Should have rejected '{url}'"
+
+    # Must accept and normalize to owner/repo:
+    must_accept = [
+        ("https://github.com/Owner/Repo", "owner/repo"),
+        ("https://github.com/Owner/Repo.git", "owner/repo"),
+        ("git+https://github.com/Owner/Repo.git", "owner/repo"),
+        ("ssh://git@github.com/Owner/Repo", "owner/repo"),
+        ("git@github.com:Owner/Repo.git", "owner/repo"),
+        ("github:Owner/Repo", "owner/repo"),
+        ("Owner/Repo", "owner/repo"),
+    ]
+    for url, expected in must_accept:
+        assert normalize(url) == expected, f"Failed to normalize '{url}' to '{expected}', got '{normalize(url)}'"
 

@@ -59,6 +59,9 @@ export default function BrowseEscrows() {
         return {
           id: e.id || id,
           registry: e.template === "NPM_VERSION" ? "NPM" : "PYPI",
+          policy: e.policy || "REGISTRY_ONLY",
+          expectedRepo: e.expected_repo || "",
+          expectedTag: e.expected_tag || "",
           state: e.status,
           pkg: e.package_name,
           ver: e.version,
@@ -334,15 +337,25 @@ export default function BrowseEscrows() {
                       <span className="px-2 py-0.5 bg-surface-container-highest text-on-surface uppercase flex items-center gap-1">
                         <span className="material-symbols-outlined text-[12px]">{escrow.registry === 'NPM' ? 'inventory_2' : 'code'}</span> {escrow.registry === 'NPM' ? 'npm (Node.js)' : 'PyPI (Python)'}
                       </span>
+                      {escrow.policy === 'SOURCE_LINKED' && (
+                        <span className="px-2 py-0.5 bg-primary-fixed/20 text-primary-fixed text-[10px] font-mono font-bold uppercase border border-primary-fixed/30">
+                          SOURCE-LINKED v2
+                        </span>
+                      )}
                       <span className="text-on-surface-variant ml-auto flex items-center gap-1">
                         <span className="font-mono text-[11px] truncate max-w-[120px]">{escrow.id}</span>
                         <button className="hover:text-primary-fixed" title="Copy Hash" onClick={() => navigator.clipboard.writeText(escrow.id)}><span className="material-symbols-outlined text-[13px]">content_copy</span></button>
                       </span>
                     </div>
-                    <div className="flex items-baseline gap-space-sm mt-1">
+                    <div className="flex flex-wrap items-baseline gap-space-sm mt-1">
                       <h3 className="font-headline-sm text-headline-sm text-primary hover:text-primary-fixed transition-colors cursor-pointer">
                         <Link href={`/escrow/${escrow.id}`}>{escrow.pkg}</Link> <span className="text-on-surface-variant font-mono-data-sm text-mono-data-sm">@ {escrow.ver}</span>
                       </h3>
+                      {escrow.policy === 'SOURCE_LINKED' && escrow.expectedRepo && (
+                        <span className="font-mono text-[11px] text-primary-fixed bg-surface-container px-2 py-0.5">
+                          GitHub: {escrow.expectedRepo}@{escrow.expectedTag}
+                        </span>
+                      )}
                     </div>
                     <p className="font-mono-data-sm text-mono-data-sm text-on-surface-variant">
                       {escrow.desc}

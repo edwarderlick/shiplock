@@ -5,6 +5,10 @@ import os
 import tempfile
 from pathlib import Path
 
+# contracts/shiplock.py is compiled against runner py-genlayer:5jycge4q8k23462jtb0b9fyey1s9qz928sz2nbrd9mg4sxqg2qng,
+# which resides under v0.6.0-rc8. Setting GENVM_VERSION default ensures gltest locates the matching runner tree.
+os.environ.setdefault("GENVM_VERSION", "v0.6.0-rc8")
+
 import pytest
 
 # Windows: gltest closes the temp stdin fd after dup2, so genlayer.gl sees EOF.

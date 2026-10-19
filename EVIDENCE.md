@@ -1,11 +1,11 @@
 # ShipLock Steward Evidence & Repository Audit Report
 
-**Network**: GenLayer Studio Next (`studio-dev`) | **Chain ID**: `61997` (`0xF22D`)  
-**Active Contract Address**: `0x7Cef756668Cd925807e8B110D0330643c6F809E3`  
-**Canonical RPC**: `https://studio-dev.genlayer.com/api`  
-**Production Web URL**: https://shiplock-chi.vercel.app/  
-**Contract Explorer**: https://explorer-studio-dev.genlayer.com/address/0x7Cef756668Cd925807e8B110D0330643c6F809E3  
-**Audit & Verification Date**: October 11, 2026  
+**Network**: GenLayer Studio Next (`studio-dev`) | **Chain ID**: `61997` (`0xF22D`)
+**Active Contract Address**: `0x7Cef756668Cd925807e8B110D0330643c6F809E3`
+**Canonical RPC**: `https://studio-dev.genlayer.com/api`
+**Production Web URL**: https://shiplock-chi.vercel.app/
+**Contract Explorer**: https://explorer-studio-dev.genlayer.com/address/0x7Cef756668Cd925807e8B110D0330643c6F809E3
+**Audit & Verification Date**: October 11, 2026
 
 ---
 
@@ -302,9 +302,13 @@ Registry credentials must never be passed in command arguments, chat, logs, or c
 
 ## 6. Secret Audit Scope & Precision
 
-- **Scope**: Scanned the *active tracked tree on `main`* using [`scripts/audit_secrets.py`](scripts/audit_secrets.py).
-- **Findings**: **0 plaintext private keys, 0 passwords, 0 decrypted keystores, 0 `.env.local` files tracked**.
-- **Important Qualification**: Sensitive local development files (`.deployer_keystore.json`, `web/.env.local`) are excluded via `.gitignore`. This audit certifies the clean state of the active commit tree and does not rewrite or erase historical Git commits.
+- **Scope**: Repository working-tree files subject to the exclusions below were scanned using [`scripts/audit_secrets.py`](scripts/audit_secrets.py) specifically for PEM private-key blocks (`-----BEGIN ... KEY-----`) and 32-byte hex candidate strings (`0x[0-9a-fA-F]{64}`).
+- **Excluded Categories**: Ignored build and dependency directories (`.git`, `node_modules`, `.next`, `__pycache__`, `.pytest_cache`, `.vercel`) as well as local secret/keystore files (`.deployer_keystore.json`, `.env.local`, `keystore.json`) that are excluded from version control via `.gitignore`.
+- **Findings Breakdown**:
+  - **Sensitive PEM Private-Key Blocks**: **0 found**.
+  - **Informational 32-byte Hex Candidates**: **45 found**.
+- **Candidate Verification**: All 45 informational 32-byte hex candidates were manually reviewed and verified as documented on-chain transaction hashes, escrow IDs, or zero/placeholder hashes recorded in documentation and evidence fixtures (`EVIDENCE.md`, `README.md`, `TESTCASES.md`, `scripts/preflight_studio_check.mjs`, `scripts/steward_evidence.json`). None represent private keys, seed phrases, or sensitive credentials.
+- **Audit Limitations & Scope Boundaries**: The scanner tests only for PEM private key headers and 32-byte hex strings. It does not scan for passwords, API tokens, or arbitrary secrets, and it excludes local environment files and keystores.
 
 ---
 
@@ -320,5 +324,40 @@ Registry credentials must never be passed in command arguments, chat, logs, or c
 | `node scripts/preflight_studio_check.mjs` | Read-only live preflight on Studio Next: contract economics reconciled across all 7 on-chain escrows; all 6 steward escrows validated (allocation builds & authoritative fee estimations verified) | **All 7 on-chain escrows reconciled & all 6 steward escrows verified (Read-only)** |
 | `npm --prefix web run lint` | ESLint static analysis | **0 errors** (18 warnings) |
 | `npm --prefix web run build` | Next.js production build | **Compiled successfully** |
-| `python scripts/audit_secrets.py` | Secret audit (active commit tree) | **0 plaintext keys, 0 passwords, 0 secrets** |
+| `python scripts/audit_secrets.py` | Secret audit (PEM keys & 32-byte hex candidates) | **0 PEM keys; 45 informational 32-byte hex candidates (reviewed transaction/escrow hashes; excludes local env/keystores)** |
 | `https://shiplock-chi.vercel.app/` | Live Vercel production deployment (`dpl_F5RHC4RAd9c1MHXfsspfiLxJ1eGm`) | **Verified live (HTTP 200)** |
+
+---
+
+## 8. Milestone v2: Source-Linked Verified Release (Pending Live Verification)
+
+### Overview
+Milestone v2 introduces the **Source-Linked Verified Release** policy (`SOURCE_LINKED`) via `fund_verified_escrow` on `contracts/shiplock.py`. Validators query both the official package registry (npm or PyPI) and independent GitHub release evidence (`https://api.github.com/repos/{owner}/{repo}/releases/tags/{tag}`), verifying publication in the UTC window, repository source matching, and exact tag alignment.
+
+### Automated Test Suite Parity (Milestone v2)
+| Test Suite | Scope | Result |
+|---|---|---|
+| `python -m pytest tests/direct -q` | Direct contract unit tests (including 9 verified release suites) | **44 passed** |
+| `python -m pytest tests/test_deployer_keystore.py -v` | Keystore & address preservation | **13 passed** |
+| `python -m pytest` | **Combined Python test suite** | **57 passed** |
+| `node --test tests/test_evidence_harness.mjs` | Evidence harness + Suite 10 dual-source release consensus & attack simulation | **60 passed** (11 suites) |
+| `npm --prefix web test` | Frontend flow + Section 8 verified escrow validation & preimage derivation | **74 passed** (16 suites) |
+| `npm --prefix web run lint` | ESLint static analysis | **0 errors** (18 warnings) |
+| `npm --prefix web run build` | Next.js 16 production build | **Compiled successfully (Turbopack)** |
+| `python scripts/audit_secrets.py` | Secret audit (PEM keys & 32-byte hex candidates) | **0 PEM keys; 45 informational 32-byte hex candidates (reviewed transaction/escrow hashes; excludes local env/keystores)** |
+
+### Live Verification Steps & Pending Placeholders
+The following operational steps require live on-chain execution and deployment for Milestone v2:
+
+| Parameter | Value / Placeholder | Status |
+|---|---|---|
+| **Accepted Baseline HEAD SHA** | `0617a800a0cabde7d1e324df110bfd3c8b7ac138` | Established baseline |
+| **Final Milestone Commit SHA** | `[PENDING: orchestrator commit]` | Pending commit creation |
+| **GitHub Compare URL** | `[PENDING: https://github.com/edwarderlick/shiplock/compare/0617a80...<final-sha>]` | Pending compare link |
+| **Milestone v2 Contract Address** | `[PENDING: deploy contracts/shiplock.py to Studio Next]` | Pending on-chain deployment |
+| **Deployment Transaction** | `[PENDING: deployment transaction hash]` | Pending deployment |
+| **Live Verified Escrow ID** | `[PENDING: fund_verified_escrow on Studio Next]` | Pending funding transaction |
+| **Successful Release Tx** | `[PENDING: in-window verified release transaction]` | Pending in-window settlement |
+| **Child Transfer Tx** | `[PENDING: emitted child transfer transaction]` | Pending settlement execution |
+| **Negative Mismatch Proof Tx** | `[PENDING: negative mismatch settlement transaction]` | Pending post-window test |
+| **Live Web App Deployment** | `[PENDING: Vercel production deployment of Milestone v2]` | Pending frontend deploy |

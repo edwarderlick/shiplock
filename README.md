@@ -20,11 +20,10 @@ Same write. No docket. No appeal UI. No court.
 | Contract explorer | https://explorer-studio-dev.genlayer.com/address/0x7Cef756668Cd925807e8B110D0330643c6F809E3 |
 | Deployment Tx | [`0x3f7e83337967b194e40fea35a4f8abea7f99a05890a422d2d89096052e2a5854`](https://explorer-studio-dev.genlayer.com/tx/0x3f7e83337967b194e40fea35a4f8abea7f99a05890a422d2d89096052e2a5854) |
 | Source Hash (SHA-256) | `be743c1a8277716d21018911352fe9d7ccd3dd30fb1b8d829d19384133401a0e` (Verified 100% parity) |
-| Tests | `python -m pytest` → **48 passed** (35 direct contract tests + 13 deployer keystore tests) |
-| Web Tests | `npm --prefix web test` → **69 passed** (15 suites) |
-| Evidence Tests | `node --test tests/test_evidence_harness.mjs` → **55 passed** (10 suites) |
-| Live on-chain smoke | Verified on Studio Next: PyPI & npm 404 escrows, cancel/refund, candidate release escrows ([EVIDENCE.md](./EVIDENCE.md)) |
-| Steward Evidence | [EVIDENCE.md](./EVIDENCE.md) · [steward_evidence.json](./scripts/steward_evidence.json) |
+| Tests | `python -m pytest` → **56 passed** (43 direct contract tests + 13 deployer keystore tests) |
+| Web Tests | `npm --prefix web test` → **74 passed** (16 suites) |
+| Evidence Tests | `node --test tests/test_evidence_harness.mjs` → **60 passed** (11 suites) |
+| Milestone Documentation | [MILESTONE_01.md](./MILESTONE_01.md) · [EVIDENCE.md](./EVIDENCE.md) · [TESTCASES.md](./TESTCASES.md) |
 
 ## Historical Deployments (Archive)
 | Version | Address | Explorer Link | Status |
@@ -62,7 +61,8 @@ IDs are `0x` + 64 hex SHA-256 strings. Never `1, 2, 3`.
 The page is live HTTP. Validators fetch it independently. Equivalence is `gl.eq_principle.strict_eq` on a parsed metadata object. Payout is the same consensus write.
 
 ## Contract API
-Writes: `fund_escrow` (payable) · `cancel` · `release` · `expire` · `withdraw`
+Policies: `REGISTRY_ONLY` ("Registry Release") · `SOURCE_LINKED` ("Source-Linked Verified Release")
+Writes: `fund_escrow` (payable) · `fund_verified_escrow` (payable) · `cancel` · `release` · `expire` · `withdraw`
 Views: `get_escrow` · `list_ids` · `get_economics` · `get_credit`
 
 ## Money
@@ -109,17 +109,17 @@ Studio Next consensus bounds phase timeouts to 30–600 timeunits. Allocations o
 
 ## Automated tests
 ```bash
-# Contract & Keystore Tests (48 passed)
+# Contract & Keystore Tests (56 passed)
 python -m pytest
 
-# Frontend Runtime & Integration Flow (69 passed)
+# Frontend Runtime & Integration Flow (74 passed)
 npm --prefix web test
 
-# Fail-Closed Evidence Harness & Recovery Tests (41 passed)
+# Fail-Closed Evidence Harness & Dual-Source Verification Tests (60 passed)
 node --test tests/test_evidence_harness.mjs
 ```
-Covered: deterministic hash IDs, concurrent distinct IDs, early 404 leaves OPEN & retryable then settles on later success, unexpected HTTP statuses (429/403/301/500) leave OPEN before and after window, fund lookback permits only verified absent, npm deprecated vs yanked, realistic large npm responses & oversize caps, now_dt explicit timestamp requirement, scoped npm packages, window-end refund boundary, in-window publication settling after window-end, PyPI multi-file earliest non-yanked selection, yanked release refunds funder, economics across all transitions, 24h & 14d gates, latest/url reject, funder≠recipient, funder cannot release, cancel before start, cancel after start reverts, release before window reverts, double release reverts, expire grace bounds, list_ids parity, withdraw ordering, end-to-end matching flow, two-recipient release allocation trees, emitted transfers & child transactions verification, pending child transfer restart reconciliation, Studio Next RPC time gate checks, and fail-closed handling of missing/malformed npm/PyPI metadata leaving escrows OPEN.
-Full matrix: [TESTCASES.md](./TESTCASES.md)
+Covered: deterministic hash IDs, concurrent distinct IDs, source-linked verified release policy, canonical GitHub repo & tag syntax validation, URL injection protection, dual-source consensus settlement, early 404 leaves OPEN & retryable then settles on later success, unexpected HTTP statuses (429/403/301/500) leave OPEN before and after window, fund lookback permits only verified absent, npm deprecated vs yanked, realistic large npm responses & oversize caps, now_dt explicit timestamp requirement, scoped npm packages, window-end refund boundary, in-window publication settling after window-end, PyPI multi-file earliest non-yanked selection, yanked release refunds funder, economics across all transitions, 24h & 14d gates, latest/url reject, funder≠recipient, funder cannot release, cancel before start, cancel after start reverts, release before window reverts, double release reverts, expire grace bounds, list_ids parity, withdraw ordering, end-to-end matching flow, two-recipient release allocation trees, emitted transfers & child transactions verification, pending child transfer restart reconciliation, Studio Next RPC time gate checks, and fail-closed handling of missing/malformed npm/PyPI metadata leaving escrows OPEN.
+Full matrix: [TESTCASES.md](./TESTCASES.md) · Milestone report: [MILESTONE_01.md](./MILESTONE_01.md)
 
 ## Live smoke & steward evidence on Studio Next (Chain 61997)
 | Step | Action | Tx Hash | Result |

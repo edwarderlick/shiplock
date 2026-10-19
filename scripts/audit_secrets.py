@@ -13,14 +13,18 @@ SAFE_HASHES = {
     '0xd450d74c9eee0d8ff4d92983bfc79ee55f01ef3609c4e6d0dd5fcb0c8867c2a3'
 }
 
-findings = []
+EXCLUDED_DIRS = ['.git', 'node_modules', '.next', '__pycache__', '.pytest_cache', '.vercel']
+EXCLUDED_FILES = ['.deployer_keystore.json', '.env.local', 'keystore.json']
+
+pem_findings = []
+hex_findings = []
 
 for root, dirs, files in os.walk('.'):
     # Skip ignored dirs
-    if any(p in root.replace('\\', '/') for p in ['.git', 'node_modules', '.next', '__pycache__', '.pytest_cache', '.vercel']):
+    if any(p in root.replace('\\', '/') for p in EXCLUDED_DIRS):
         continue
     for f in files:
-        if f in ['.deployer_keystore.json', '.env.local', 'keystore.json']:
+        if f in EXCLUDED_FILES:
             continue
         filepath = os.path.join(root, f)
         norm_path = filepath.replace('\\', '/')
@@ -28,18 +32,30 @@ for root, dirs, files in os.walk('.'):
             content = open(filepath, 'r', encoding='utf-8', errors='ignore').read()
         except Exception:
             continue
-        
+
         # Check 32-byte hex
         for m in re.finditer(r'0x[0-9a-fA-F]{64}', content):
             h = m.group(0)
             if h not in SAFE_HASHES and 'fixture' not in norm_path and 'test' not in norm_path:
-                findings.append((norm_path, '32-byte-hex', h))
-        
+                hex_findings.append((norm_path, '32-byte-hex', h))
+
         # Check private key headers
         if 'BEGIN' in content and 'KEY' in content:
             if re.search(r'-----BEGIN (?:RSA|EC|OPENSSH|PRIVATE) KEY-----', content):
-                findings.append((norm_path, 'PEM-key', 'PRIVATE KEY BLOCK'))
+                pem_findings.append((norm_path, 'PEM-key', 'PRIVATE KEY BLOCK'))
 
-print(f"Total findings: {len(findings)}")
-for f in findings:
-    print(f" - {f[0]}: {f[1]} -> {f[2]}")
+total_findings = len(pem_findings) + len(hex_findings)
+
+print("=== Secret Audit Report ===")
+print("Audit Scope: Repository working-tree files subject to the exclusions below were scanned for PEM private keys and 32-byte hex candidate strings.")
+print(f"Excluded Directories: {', '.join(EXCLUDED_DIRS)}")
+print(f"Excluded Files: {', '.join(EXCLUDED_FILES)}")
+print("Note: Passwords, API tokens, and local environment/keystore files are not scanned by this script.")
+print()
+print(f"Total findings: {total_findings}")
+print(f" - Sensitive PEM-key findings: {len(pem_findings)}")
+for f in pem_findings:
+    print(f"   * {f[0]}: {f[1]} -> {f[2]}")
+print(f" - Informational 32-byte hex candidates: {len(hex_findings)}")
+for f in hex_findings:
+    print(f"   * {f[0]}: {f[1]} -> {f[2]}")

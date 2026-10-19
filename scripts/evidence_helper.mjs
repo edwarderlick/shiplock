@@ -304,6 +304,244 @@ export function parseNpmMetadata(data, targetPkg, targetVer) {
 }
 
 /**
+ * Strict canonical validation of GitHub repository matching contracts/shiplock.py:_validate_github_repo.
+ */
+export function validateGithubRepo(raw) {
+  if (typeof raw !== "string") {
+    return { valid: false, error: "Repository must be a string", normalized: null };
+  }
+  if (!raw || raw !== raw.trim()) {
+    return { valid: false, error: "Repository cannot be empty or have leading/trailing whitespace", normalized: null };
+  }
+  const s = raw.trim();
+  if (s.length < 3 || s.length > 128) {
+    return { valid: false, error: "Repository length must be 3-128 characters", normalized: null };
+  }
+  for (let i = 0; i < s.length; i++) {
+    const code = s.charCodeAt(i);
+    if (code < 33 || code > 126) {
+      return { valid: false, error: "Repository contains whitespace, control character, or non-ASCII", normalized: null };
+    }
+  }
+  if (s.includes("://") || s.startsWith("//")) {
+    return { valid: false, error: "Repository cannot contain URL scheme", normalized: null };
+  }
+  if (s.includes("?") || s.includes("#")) {
+    return { valid: false, error: "Repository cannot contain query or fragment", normalized: null };
+  }
+  if (s.includes("..")) {
+    return { valid: false, error: "Repository cannot contain path traversal", normalized: null };
+  }
+  if (s.includes("\\")) {
+    return { valid: false, error: "Repository cannot contain backslash", normalized: null };
+  }
+  const parts = s.split("/");
+  if (parts.length !== 2) {
+    return { valid: false, error: "Repository must be in canonical 'owner/repo' format with exactly one slash", normalized: null };
+  }
+  const [owner, repo] = parts;
+  if (!owner || !repo) {
+    return { valid: false, error: "Owner and repo cannot be empty", normalized: null };
+  }
+  if (owner.length > 39) {
+    return { valid: false, error: "Owner cannot exceed 39 characters", normalized: null };
+  }
+  if (repo.length > 100) {
+    return { valid: false, error: "Repository cannot exceed 100 characters", normalized: null };
+  }
+  if (owner.startsWith("-") || owner.endsWith("-") || owner.includes("--")) {
+    return { valid: false, error: "Owner cannot start/end with hyphen or have consecutive hyphens", normalized: null };
+  }
+  if (!/^[a-zA-Z0-9-]+$/.test(owner)) {
+    return { valid: false, error: "Owner must be alphanumeric with single hyphens", normalized: null };
+  }
+  if (repo === "." || repo === ".." || repo.endsWith(".git") || repo.startsWith(".") || repo.startsWith("-")) {
+    return { valid: false, error: "Invalid repository name syntax (cannot start with dot/hyphen, cannot end in .git, cannot be . or ..)", normalized: null };
+  }
+  if (!/^[a-zA-Z0-9_.-]+$/.test(repo)) {
+    return { valid: false, error: "Repository name contains invalid characters", normalized: null };
+  }
+  const normalized = `${owner.toLowerCase()}/${repo.toLowerCase()}`;
+  return { valid: true, error: null, normalized };
+}
+
+/**
+ * Strict canonical validation of GitHub release tag matching contracts/shiplock.py:_validate_github_tag.
+ */
+export function validateGithubTag(raw) {
+  if (typeof raw !== "string") {
+    return { valid: false, error: "Tag must be a string", normalized: null };
+  }
+  if (!raw || raw !== raw.trim()) {
+    return { valid: false, error: "Tag cannot be empty or have leading/trailing whitespace", normalized: null };
+  }
+  const t = raw.trim();
+  if (t.length < 1 || t.length > 128) {
+    return { valid: false, error: "Tag length must be 1-128 characters", normalized: null };
+  }
+  for (let i = 0; i < t.length; i++) {
+    const code = t.charCodeAt(i);
+    if (code < 33 || code > 126) {
+      return { valid: false, error: "Tag contains whitespace, control character, or non-ASCII", normalized: null };
+    }
+  }
+  if (t.includes("/") || t.includes("\\")) {
+    return { valid: false, error: "Tag cannot contain slash or backslash", normalized: null };
+  }
+  if (t.includes("?") || t.includes("#")) {
+    return { valid: false, error: "Tag cannot contain query or fragment", normalized: null };
+  }
+  if (t.includes("://") || t.startsWith("//")) {
+    return { valid: false, error: "Tag cannot contain URL scheme", normalized: null };
+  }
+  const forbidden = ["~", "^", ":", "*", "[", "]", "@{", "@", "$", ";", "&", "|", "<", ">", '"', "'", "`", "%"];
+  for (const f of forbidden) {
+    if (t.includes(f)) {
+      return { valid: false, error: `Tag contains forbidden character: ${f}`, normalized: null };
+    }
+  }
+  if (t.includes("..") || t === "." || t.startsWith(".") || t.endsWith(".") || t.endsWith(".lock")) {
+    return { valid: false, error: "Invalid tag syntax", normalized: null };
+  }
+  return { valid: true, error: null, normalized: t };
+}
+
+/**
+ * Normalizes GitHub repository URLs matching contracts/shiplock.py:_normalize_github_repo_url.
+ */
+export function normalizeGithubRepoUrl(raw) {
+  if (!raw || typeof raw !== "string") return "";
+  const s = raw.trim();
+  if (!s) return "";
+  for (let i = 0; i < s.length; i++) {
+    const code = s.charCodeAt(i);
+    if (code <= 32 || (code >= 127 && code <= 159)) return "";
+  }
+
+  let remainder = null;
+  if (s.startsWith("git+https://github.com/")) {
+    remainder = s.slice("git+https://github.com/".length);
+  } else if (s.startsWith("ssh://git@github.com/")) {
+    remainder = s.slice("ssh://git@github.com/".length);
+  } else if (s.startsWith("git@github.com:")) {
+    remainder = s.slice("git@github.com:".length);
+  } else if (s.startsWith("https://github.com/")) {
+    remainder = s.slice("https://github.com/".length);
+  } else if (s.startsWith("http://github.com/")) {
+    remainder = s.slice("http://github.com/".length);
+  } else if (s.startsWith("github:")) {
+    remainder = s.slice("github:".length);
+    if (remainder.startsWith("/") || remainder.startsWith("\\")) {
+      return "";
+    }
+  } else if (s.includes("/") && !s.includes("://") && !s.includes(":") && !s.includes("@") && !s.includes("\\")) {
+    remainder = s;
+  } else {
+    return "";
+  }
+
+  let path = remainder;
+  if (path.includes("?")) path = path.split("?")[0];
+  if (path.includes("#")) path = path.split("#")[0];
+  path = path.trim();
+
+  if (path.endsWith("/")) path = path.slice(0, -1);
+  if (path.endsWith(".git")) path = path.slice(0, -4);
+  if (path.endsWith("/")) path = path.slice(0, -1);
+
+  const parts = path.split("/");
+  if (parts.length !== 2) return "";
+  const [owner, repo] = parts;
+  if (!owner || !repo) return "";
+
+  const val = validateGithubRepo(`${owner}/${repo}`);
+  return val.valid ? val.normalized : "";
+}
+
+/**
+ * Parses GitHub release endpoint responses matching contracts/shiplock.py:parse_github_release_metadata.
+ */
+export function parseGithubReleaseMetadata(data, expectedRepo, expectedTag) {
+  if (!data || typeof data !== "object") {
+    return {
+      status_code: 200,
+      kind: "non-json",
+      exists: false,
+      tag_name: "",
+      published_utc: "",
+      draft: false,
+      prerelease: false,
+      error: "non-json data",
+    };
+  }
+  const tagName = String(data.tag_name || "").trim();
+  if (!tagName) {
+    return {
+      status_code: 200,
+      kind: "inconclusive",
+      exists: false,
+      tag_name: "",
+      published_utc: "",
+      draft: false,
+      prerelease: false,
+      error: "missing tag_name",
+    };
+  }
+  if (tagName !== expectedTag.trim()) {
+    return {
+      status_code: 200,
+      kind: "mismatch",
+      exists: true,
+      tag_name: tagName,
+      published_utc: "",
+      draft: false,
+      prerelease: false,
+      error: "tag mismatch",
+    };
+  }
+  const isDraft = Boolean(data.draft);
+  const isPrerelease = Boolean(data.prerelease);
+  const rawPub = data.published_at || data.created_at;
+  if (!rawPub) {
+    return {
+      status_code: 200,
+      kind: "inconclusive",
+      exists: true,
+      tag_name: tagName,
+      published_utc: "",
+      draft: isDraft,
+      prerelease: isPrerelease,
+      error: "missing published_at/created_at",
+    };
+  }
+  let pubIso = "";
+  try {
+    const dt = parseUtcIso(String(rawPub));
+    pubIso = dt.toISOString();
+  } catch {
+    return {
+      status_code: 200,
+      kind: "inconclusive",
+      exists: true,
+      tag_name: tagName,
+      published_utc: "",
+      draft: isDraft,
+      prerelease: isPrerelease,
+      error: "invalid published_at timestamp",
+    };
+  }
+  return {
+    status_code: 200,
+    kind: "200",
+    exists: true,
+    tag_name: tagName,
+    published_utc: pubIso,
+    draft: isDraft,
+    prerelease: isPrerelease,
+  };
+}
+
+/**
  * Queries official registry endpoints for PyPI and npm.
  */
 export async function queryRegistryMetadata(template, packageName, version) {
