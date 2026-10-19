@@ -16,11 +16,11 @@ Same write. No docket. No appeal UI. No court.
 | Chain ID | 61997 (`0xF22D`) |
 | RPC | https://studio-dev.genlayer.com/api |
 | Explorer | https://explorer-studio-dev.genlayer.com/ |
-| **Active Contract** | `0x7Cef756668Cd925807e8B110D0330643c6F809E3` |
-| Contract explorer | https://explorer-studio-dev.genlayer.com/address/0x7Cef756668Cd925807e8B110D0330643c6F809E3 |
-| Deployment Tx | [`0x3f7e83337967b194e40fea35a4f8abea7f99a05890a422d2d89096052e2a5854`](https://explorer-studio-dev.genlayer.com/tx/0x3f7e83337967b194e40fea35a4f8abea7f99a05890a422d2d89096052e2a5854) |
-| Source Hash (SHA-256) | `be743c1a8277716d21018911352fe9d7ccd3dd30fb1b8d829d19384133401a0e` (Verified 100% parity) |
-| Tests | `python -m pytest` → **56 passed** (43 direct contract tests + 13 deployer keystore tests) |
+| **Active Contract** | `0xF2110c3E6B170caF10FE953564285C6f01cB1F0c` |
+| Contract explorer | https://explorer-studio-dev.genlayer.com/address/0xF2110c3E6B170caF10FE953564285C6f01cB1F0c |
+| Deployment Tx | [`0x6874241737bf6b45f0e5f71211a5923bb02e6c8b715b15ed606a405d4a28182f`](https://explorer-studio-dev.genlayer.com/tx/0x6874241737bf6b45f0e5f71211a5923bb02e6c8b715b15ed606a405d4a28182f) |
+| Source Hash (SHA-256) | `860387dc9579aba8d445df9395c4ec80bc425b7b8a3d7b27eed8cc477b59276d` (Verified 100% parity, 51,327 bytes) |
+| Tests | `python -m pytest` → **57 passed** (44 direct contract tests + 13 deployer keystore tests) |
 | Web Tests | `npm --prefix web test` → **74 passed** (16 suites) |
 | Evidence Tests | `node --test tests/test_evidence_harness.mjs` → **60 passed** (11 suites) |
 | Milestone Documentation | [MILESTONE_01.md](./MILESTONE_01.md) · [EVIDENCE.md](./EVIDENCE.md) · [TESTCASES.md](./TESTCASES.md) |
@@ -28,6 +28,7 @@ Same write. No docket. No appeal UI. No court.
 ## Historical Deployments (Archive)
 | Version | Address | Explorer Link | Status |
 |---|---|---|---|
+| Historical Release v1 | `0x7Cef756668Cd925807e8B110D0330643c6F809E3` | [Explorer](https://explorer-studio-dev.genlayer.com/address/0x7Cef756668Cd925807e8B110D0330643c6F809E3) | Historical (Replaced by v2) |
 | Historical Devnet 2 | `0xF52d9FD2a1542b3F84417a916f3aB4B4631D0b3D` | [Explorer](https://explorer-studio-dev.genlayer.com/address/0xF52d9FD2a1542b3F84417a916f3aB4B4631D0b3D) | Historical (Replaced) |
 | Historical Devnet 1 | `0x53EAd6deB8103B278e663Bc9808926FB7B308a63` | [Explorer](https://explorer-studio-dev.genlayer.com/address/0x53EAd6deB8103B278e663Bc9808926FB7B308a63) | Historical (Replaced) |
 
@@ -109,7 +110,7 @@ Studio Next consensus bounds phase timeouts to 30–600 timeunits. Allocations o
 
 ## Automated tests
 ```bash
-# Contract & Keystore Tests (56 passed)
+# Contract & Keystore Tests (57 passed)
 python -m pytest
 
 # Frontend Runtime & Integration Flow (74 passed)
@@ -154,10 +155,10 @@ Wallet must be on chain 61997. Faucet: Studio Next account dropdown.
 ## Vercel
 Root directory: `web`
 Env (Production + Preview):
-- `NEXT_PUBLIC_CONTRACT_ADDRESS` = `0x7Cef756668Cd925807e8B110D0330643c6F809E3`
+- `NEXT_PUBLIC_CONTRACT_ADDRESS` = `0xF2110c3E6B170caF10FE953564285C6f01cB1F0c`
 - `NEXT_PUBLIC_CHAIN_ID` = `61997`
 - `NEXT_PUBLIC_STUDIO_RPC` = `https://studio-dev.genlayer.com/api`
-- `NEXT_PUBLIC_EXPLORER` = `https://explorer-studio-dev.genlayer.com`
+- `NEXT_PUBLIC_STUDIO_EXPLORER` = `https://explorer-studio-dev.genlayer.com`
 Framework: Next.js.
 
 ## Steward notes already baked in

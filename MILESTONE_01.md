@@ -170,7 +170,7 @@ All verification suites executed locally against the implementation:
 ```bash
 # 1. Direct Python Contract & Keystore Tests:
 python -m pytest
-# Result: 56 passed in 11.10s (43 contract direct tests + 13 deployer keystore tests)
+# Result: 57 passed in 11.10s (44 direct contract tests + 13 deployer keystore tests)
 
 # 2. Node Evidence Harness & Adversarial Simulation:
 node --test tests/test_evidence_harness.mjs
@@ -225,15 +225,30 @@ npm --prefix web run build
 
 ---
 
-## 10. Live Verification Status (Placeholders)
+## 10. Live Verification Status
 
-The following live operational steps require human execution on the live network and are clearly marked **PENDING**:
+### On-Chain Contract Deployment (Verified)
+- **Milestone v2 Contract Address**: [`0xF2110c3E6B170caF10FE953564285C6f01cB1F0c`](https://explorer-studio-dev.genlayer.com/address/0xF2110c3E6B170caF10FE953564285C6f01cB1F0c)
+- **Deployment Transaction Hash**: [`0x6874241737bf6b45f0e5f71211a5923bb02e6c8b715b15ed606a405d4a28182f`](https://explorer-studio-dev.genlayer.com/tx/0x6874241737bf6b45f0e5f71211a5923bb02e6c8b715b15ed606a405d4a28182f)
+- **Receipt Status**: `FINALIZED` (Status Code 7)
+- **Execution Result**: `FINISHED_WITH_RETURN` (Execution Result Code 1)
+- **Consensus Round Outcome**: `MAJORITY_AGREE` (5/5 revealed validator votes)
+- **Source Parity Status**: `EXACT UTF-8 BYTE MATCH` (51,327 local bytes == 51,327 on-chain bytes; SHA-256: `860387dc9579aba8d445df9395c4ec80bc425b7b8a3d7b27eed8cc477b59276d`)
+- **Deployer Public Address**: `0x20E850BAaD26d763d4f691780D1BEBA01c8D6084`
+- **Network / Chain ID**: GenLayer Studio Devnet / Studio Next (`61997`)
+
+### Verified Production Web Deployment
+- **Live Application Deployment**: Verified live (Status: Ready / Production)
+  - **Production Alias**: [https://shiplock-chi.vercel.app](https://shiplock-chi.vercel.app)
+  - **Deployment URL**: [https://shiplock-7xwj3qiap-edwarderlicks-projects.vercel.app](https://shiplock-7xwj3qiap-edwarderlicks-projects.vercel.app)
+  - **Deployment ID**: `dpl_CV5iGz1n2hYAbTKqJHDvDvNdTJcu`
+
+### Pending Milestone v2 Operational Evidence (Phase C)
+The following live operational steps require subsequent milestone phases and are clearly marked **PENDING**:
 
 - **Final Commit SHA**: `[PENDING: orchestrator commit]`
 - **GitHub Compare URL**: `[PENDING: https://github.com/edwarderlick/shiplock/compare/0617a80...<final-sha>]`
-- **New Contract Address**: `[PENDING: deploy contracts/shiplock.py to Studio Next]`
-- **Deployment Transaction Hash**: `[PENDING: deployment tx hash]`
-- **Successful Release Transaction Hash**: `[PENDING: in-window verified release tx hash]`
-- **Child Transfer Transaction Hash**: `[PENDING: emitted child transfer tx hash]`
-- **Negative / Mismatch Proof Hash**: `[PENDING: negative mismatch settlement tx hash]`
-- **Live Application Deployment**: `[PENDING: Vercel deployment of milestone v2]`
+- **Live Verified Escrow ID**: `[PENDING: fund_verified_escrow on Studio Next (Phase C)]`
+- **Successful Release Transaction Hash**: `[PENDING: in-window verified release tx hash (Phase C)]`
+- **Child Transfer Transaction Hash**: `[PENDING: emitted child transfer tx hash (Phase C)]`
+- **Negative / Mismatch Proof Hash**: `[PENDING: negative mismatch settlement tx hash (Phase C)]`

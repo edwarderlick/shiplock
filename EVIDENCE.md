@@ -347,17 +347,18 @@ Milestone v2 introduces the **Source-Linked Verified Release** policy (`SOURCE_L
 | `python scripts/audit_secrets.py` | Secret audit (PEM keys & 32-byte hex candidates) | **0 PEM keys; 45 informational 32-byte hex candidates (reviewed transaction/escrow hashes; excludes local env/keystores)** |
 
 ### Live Verification Steps & Pending Placeholders
-The following operational steps require live on-chain execution and deployment for Milestone v2:
+The following operational steps record the verified on-chain deployment and outline subsequent live testing steps:
 
 | Parameter | Value / Placeholder | Status |
 |---|---|---|
 | **Accepted Baseline HEAD SHA** | `0617a800a0cabde7d1e324df110bfd3c8b7ac138` | Established baseline |
+| **Milestone v2 Contract Address** | [`0xF2110c3E6B170caF10FE953564285C6f01cB1F0c`](https://explorer-studio-dev.genlayer.com/address/0xF2110c3E6B170caF10FE953564285C6f01cB1F0c) | Verified on-chain |
+| **Deployment Transaction** | [`0x6874241737bf6b45f0e5f71211a5923bb02e6c8b715b15ed606a405d4a28182f`](https://explorer-studio-dev.genlayer.com/tx/0x6874241737bf6b45f0e5f71211a5923bb02e6c8b715b15ed606a405d4a28182f) | FINALIZED / FINISHED_WITH_RETURN / MAJORITY_AGREE |
+| **On-Chain Source Parity** | `860387dc9579aba8d445df9395c4ec80bc425b7b8a3d7b27eed8cc477b59276d` (51,327 bytes) | EXACT UTF-8 BYTE MATCH (100% parity) |
 | **Final Milestone Commit SHA** | `[PENDING: orchestrator commit]` | Pending commit creation |
 | **GitHub Compare URL** | `[PENDING: https://github.com/edwarderlick/shiplock/compare/0617a80...<final-sha>]` | Pending compare link |
-| **Milestone v2 Contract Address** | `[PENDING: deploy contracts/shiplock.py to Studio Next]` | Pending on-chain deployment |
-| **Deployment Transaction** | `[PENDING: deployment transaction hash]` | Pending deployment |
-| **Live Verified Escrow ID** | `[PENDING: fund_verified_escrow on Studio Next]` | Pending funding transaction |
-| **Successful Release Tx** | `[PENDING: in-window verified release transaction]` | Pending in-window settlement |
-| **Child Transfer Tx** | `[PENDING: emitted child transfer transaction]` | Pending settlement execution |
-| **Negative Mismatch Proof Tx** | `[PENDING: negative mismatch settlement transaction]` | Pending post-window test |
-| **Live Web App Deployment** | `[PENDING: Vercel production deployment of Milestone v2]` | Pending frontend deploy |
+| **Live Verified Escrow ID** | `[PENDING: fund_verified_escrow on Studio Next (Phase C)]` | Pending funding transaction |
+| **Successful Release Tx** | `[PENDING: in-window verified release transaction (Phase C)]` | Pending in-window settlement |
+| **Child Transfer Tx** | `[PENDING: emitted child transfer transaction (Phase C)]` | Pending settlement execution |
+| **Negative Mismatch Proof Tx** | `[PENDING: negative mismatch settlement transaction (Phase C)]` | Pending post-window test |
+| **Live Web App Deployment** | [https://shiplock-chi.vercel.app](https://shiplock-chi.vercel.app) (Deployment: [`dpl_CV5iGz1n2hYAbTKqJHDvDvNdTJcu`](https://shiplock-7xwj3qiap-edwarderlicks-projects.vercel.app)) | Ready / Production |
