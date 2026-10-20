@@ -347,18 +347,62 @@ Milestone v2 introduces the **Source-Linked Verified Release** policy (`SOURCE_L
 | `python scripts/audit_secrets.py` | Secret audit (PEM keys & 32-byte hex candidates) | **0 PEM keys; 45 informational 32-byte hex candidates (reviewed transaction/escrow hashes; excludes local env/keystores)** |
 
 ### Live Verification Steps & Pending Placeholders
-The following operational steps record the verified on-chain deployment and outline subsequent live testing steps:
+The following operational steps record the verified on-chain deployment, verified live funding proofs, and current publication/settlement statuses:
 
 | Parameter | Value / Placeholder | Status |
 |---|---|---|
 | **Accepted Baseline HEAD SHA** | `0617a800a0cabde7d1e324df110bfd3c8b7ac138` | Established baseline |
 | **Milestone v2 Contract Address** | [`0xF2110c3E6B170caF10FE953564285C6f01cB1F0c`](https://explorer-studio-dev.genlayer.com/address/0xF2110c3E6B170caF10FE953564285C6f01cB1F0c) | Verified on-chain |
-| **Deployment Transaction** | [`0x6874241737bf6b45f0e5f71211a5923bb02e6c8b715b15ed606a405d4a28182f`](https://explorer-studio-dev.genlayer.com/tx/0x6874241737bf6b45f0e5f71211a5923bb02e6c8b715b15ed606a405d4a28182f) | FINALIZED / FINISHED_WITH_RETURN / MAJORITY_AGREE |
+| **Deployment Transaction** | [`0x6874241737bf6b45f0e5f71211a5923bb02e6c8b715b15ed606a405d4a28182f`](https://explorer-studio-dev.genlayer.com/transactions/0x6874241737bf6b45f0e5f71211a5923bb02e6c8b715b15ed606a405d4a28182f) | FINALIZED / FINISHED_WITH_RETURN / MAJORITY_AGREE |
 | **On-Chain Source Parity** | `860387dc9579aba8d445df9395c4ec80bc425b7b8a3d7b27eed8cc477b59276d` (51,327 bytes) | EXACT UTF-8 BYTE MATCH (100% parity) |
+| **SUCCESS Escrow ID** | `0x5c751544da2e5d505dbdb118ca2fb94e53091bb28493c236889ae69fc78a909d` | Verified OPEN (`LOOKBACK_404_OK`, 0.01 GEN locked) |
+| **SUCCESS Funding Tx** | [`0x86538668726638307a4897eb2fcb89ccd4d2ce642fc42abf10abab6ea8cf9726`](https://explorer-studio-dev.genlayer.com/transactions/0x86538668726638307a4897eb2fcb89ccd4d2ce642fc42abf10abab6ea8cf9726) | FINALIZED / FINISHED_WITH_RETURN (Exclusive State Recovery) |
+| **SUCCESS Window** | `2026-10-21T06:58:31Z` to `2026-10-23T06:58:31Z` | Active lead; window opens 2026-10-21 |
+| **MISMATCH Escrow ID** | `0xdb592d59e4dbc85926eac234ba3c92677ec2f42aeb4de1f1430cf9454d7a5a88` | Verified OPEN (`LOOKBACK_404_OK`, 0.01 GEN locked) |
+| **MISMATCH Funding Tx** | [`0xa0acb2c81ef7e8aaae6d0f826f0ca6101904a337a1ef797d22855ade0d68ecf0`](https://explorer-studio-dev.genlayer.com/transactions/0xa0acb2c81ef7e8aaae6d0f826f0ca6101904a337a1ef797d22855ade0d68ecf0) | FINALIZED / FINISHED_WITH_RETURN (Verified post-funding) |
+| **MISMATCH Window** | `2026-10-21T11:20:26Z` to `2026-10-23T11:20:26Z` | Active lead; window opens 2026-10-21 |
+| **Common Publication Interval** | `2026-10-21T11:20:26Z` to `2026-10-23T06:58:31Z` (UTC) / `2026-10-21 16:50:26` to `2026-10-23 12:28:31` (IST) | Overlap duration: 43h 38m 5s |
+| **Current Contract Economics** | `escrowed_open = 20000000000000000` wei (0.02 GEN), `paid = 0`, `refunded = 0`, `credits = 0`, `treasury = 0` | Verified on-chain via `get_economics()` |
+| **Live Web App Deployment** | [https://shiplock-chi.vercel.app](https://shiplock-chi.vercel.app) (Deployment: [`dpl_CV5iGz1n2hYAbTKqJHDvDvNdTJcu`](https://shiplock-7xwj3qiap-edwarderlicks-projects.vercel.app)) | Ready / Production |
 | **Final Milestone Commit SHA** | `[PENDING: orchestrator commit]` | Pending commit creation |
 | **GitHub Compare URL** | `[PENDING: https://github.com/edwarderlick/shiplock/compare/0617a80...<final-sha>]` | Pending compare link |
-| **Live Verified Escrow ID** | `[PENDING: fund_verified_escrow on Studio Next (Phase C)]` | Pending funding transaction |
-| **Successful Release Tx** | `[PENDING: in-window verified release transaction (Phase C)]` | Pending in-window settlement |
-| **Child Transfer Tx** | `[PENDING: emitted child transfer transaction (Phase C)]` | Pending settlement execution |
-| **Negative Mismatch Proof Tx** | `[PENDING: negative mismatch settlement transaction (Phase C)]` | Pending post-window test |
-| **Live Web App Deployment** | [https://shiplock-chi.vercel.app](https://shiplock-chi.vercel.app) (Deployment: [`dpl_CV5iGz1n2hYAbTKqJHDvDvNdTJcu`](https://shiplock-7xwj3qiap-edwarderlicks-projects.vercel.app)) | Ready / Production |
+| **Successful Release Tx** | `[PENDING: in-window verified release transaction (Phase C4)]` | Pending in-window settlement |
+| **Child Transfer Tx** | `[PENDING: emitted child transfer transaction (Phase C4)]` | Pending settlement execution |
+| **Negative Mismatch Proof Tx** | `[PENDING: post-window mismatch refund transaction (Phase C4)]` | Pending post-window test |
+
+### Verified Live Escrow Audit Records (Phase C2/C3 Live State)
+
+1. **SUCCESS Escrow (In-Window Source-Linked Verified Release Proof)**:
+   - **Case Identifier**: `success`
+   - **Escrow ID**: `0x5c751544da2e5d505dbdb118ca2fb94e53091bb28493c236889ae69fc78a909d`
+   - **Transaction Hash**: [`0x86538668726638307a4897eb2fcb89ccd4d2ce642fc42abf10abab6ea8cf9726`](https://explorer-studio-dev.genlayer.com/transactions/0x86538668726638307a4897eb2fcb89ccd4d2ce642fc42abf10abab6ea8cf9726)
+   - **Submitted At**: `2026-10-20T04:58:37.572Z`
+   - **Receipt & Execution Outcome**: Status `FINALIZED`, Exec `FINISHED_WITH_RETURN`
+   - **Captured State**: `OPEN` (`LOOKBACK_404_OK`)
+   - **Locked Principal**: `10000000000000000` wei (`0.01 GEN`)
+   - **Template & Package**: `NPM_VERSION` / `shiplock-v2-evidence-f2110c3e` @ `1.0.0`
+   - **Expected Repository**: `edwarderlick/shiplock`
+   - **Expected Release Tag**: `shiplock-evidence-v2-success-f2110c3e`
+   - **Authorized Window**: `2026-10-21T06:58:31Z` through `2026-10-23T06:58:31Z`
+   - **Nonce**: `1001`
+   - **Audit Provenance**: Verified via `EXCLUSIVE_STATE_RECOVERY` audit (`2026-10-20T07:27:35.665Z`) with all 10 exclusive state assertions satisfied against on-chain state (single contract escrow, 0.01 GEN open economics, pre-state zero economics, immutable identity match, mismatch unfunded at recovery time, external coordinates absent).
+
+2. **MISMATCH Escrow (Post-Window Conclusive Negative Refund Proof)**:
+   - **Case Identifier**: `mismatch`
+   - **Escrow ID**: `0xdb592d59e4dbc85926eac234ba3c92677ec2f42aeb4de1f1430cf9454d7a5a88`
+   - **Transaction Hash**: [`0xa0acb2c81ef7e8aaae6d0f826f0ca6101904a337a1ef797d22855ade0d68ecf0`](https://explorer-studio-dev.genlayer.com/transactions/0xa0acb2c81ef7e8aaae6d0f826f0ca6101904a337a1ef797d22855ade0d68ecf0)
+   - **Submitted At**: `2026-10-20T09:20:31.614Z`
+   - **Receipt & Execution Outcome**: Status `FINALIZED`, Exec `FINISHED_WITH_RETURN`
+   - **Captured State**: `OPEN` (`LOOKBACK_404_OK`)
+   - **Locked Principal**: `10000000000000000` wei (`0.01 GEN`)
+   - **Template & Package**: `NPM_VERSION` / `shiplock-v2-no-release-f2110c3e` @ `1.0.0`
+   - **Expected Repository**: `edwarderlick/shiplock`
+   - **Expected Release Tag**: `shiplock-evidence-v2-missing-f2110c3e` (Strictly prohibited from creation)
+   - **Authorized Window**: `2026-10-21T11:20:26Z` through `2026-10-23T11:20:26Z`
+   - **Nonce**: `1002`
+   - **Audit Provenance**: Captured immediately post-funding (`2026-10-20T09:21:13.367Z`) verifying on-chain escrow creation and economics transition from `10000000000000000` wei (0.01 GEN) to `20000000000000000` wei (0.02 GEN).
+
+### Publication & Settlement Invariants (Phase C4 Status: PENDING)
+- **Zero Publication Invariant (Phase C4A)**: Both npm packages (`shiplock-v2-evidence-f2110c3e@1.0.0`, `shiplock-v2-no-release-f2110c3e@1.0.0`) and the SUCCESS GitHub release tag (`shiplock-evidence-v2-success-f2110c3e`) are confirmed strictly unpublished (all four return HTTP 404).
+- **Prohibited Tag Invariant**: The tag `shiplock-evidence-v2-missing-f2110c3e` must **NEVER** be created, ensuring conclusive post-window refund.
+- **Pending Status**: Phase C4 publication and settlement operations remain strictly pending until the common publication window begins (`2026-10-21T11:20:26Z` / `2026-10-21 16:50:26 IST`). No release or refund success is claimed prematurely.

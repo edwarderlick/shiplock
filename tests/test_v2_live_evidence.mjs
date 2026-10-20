@@ -32,10 +32,16 @@ import {
   deriveV2EscrowId,
   buildV2ReleaseAllocations,
   verifyReceiptFinalizedSuccess,
+  verifyAuthoritativeOutcome,
   verifyFundedEscrowAudit,
   verifyEscrowImmutableIdentity,
   serializeReceipt,
   queryGithubRelease,
+  normalizeTransactionOutcome,
+  attemptExclusiveStateRecovery,
+  reconcileExistingFundingHash,
+  checkExternalCoordinatesAbsent,
+  getTransactionOutcome,
   runPreflight,
   runFund,
   runReconcile,
@@ -2017,5 +2023,1374 @@ describe("ShipLock v2 Live Evidence Harness — Comprehensive Safety Suite", () 
     } finally {
       delete process.env.SHIPLOCK_LIVE_WRITE;
     }
+  });
+
+  // 35. normalizeTransactionOutcome handles native FINALIZED + FINISHED_WITH_RETURN
+  it("35. normalizeTransactionOutcome handles native FINALIZED + FINISHED_WITH_RETURN", () => {
+    const raw = { statusName: "FINALIZED", txExecutionResultName: "FINISHED_WITH_RETURN" };
+    const outcome = normalizeTransactionOutcome(raw);
+    assert.equal(outcome.finalized, true);
+    assert.equal(outcome.success, true);
+    assert.equal(outcome.statusName, "FINALIZED");
+    assert.equal(outcome.executionResultName, "FINISHED_WITH_RETURN");
+    assert.equal(outcome.executionResult, 1);
+  });
+
+  // 36. normalizeTransactionOutcome handles native numeric status 7 + result 1
+  it("36. normalizeTransactionOutcome handles native numeric status 7 + result 1", () => {
+    const raw = { status: 7, last_round: { result: 1 } };
+    const outcome = normalizeTransactionOutcome(raw);
+    assert.equal(outcome.finalized, true);
+    assert.equal(outcome.success, true);
+    assert.equal(outcome.statusName, "FINALIZED");
+    assert.equal(outcome.executionResultName, "FINISHED_WITH_RETURN");
+    assert.equal(outcome.executionResult, 1);
+  });
+
+  // 37. normalizeTransactionOutcome combines standard receipt success with native finalized success
+  it("37. normalizeTransactionOutcome combines standard receipt 'success' with native finalized success", () => {
+    const receipt = { status: "success", transactionHash: "0xhash" };
+    const nativeTx = { status: 7, last_round: { result: 1 } };
+    const outcome = normalizeTransactionOutcome(receipt, nativeTx);
+    assert.equal(outcome.finalized, true);
+    assert.equal(outcome.success, true);
+    assert.equal(outcome.stdReceiptStatus, "success");
+    assert.equal(outcome.statusName, "FINALIZED");
+    assert.equal(outcome.executionResultName, "FINISHED_WITH_RETURN");
+  });
+
+  // 38. Standard receipt "success" without native finality fails closed
+  it("38. Standard receipt 'success' without native finality fails closed", () => {
+    const receiptOnly = { status: "success", transactionHash: "0xhash" };
+    const outcome = normalizeTransactionOutcome(receiptOnly);
+    assert.equal(outcome.finalized, false);
+    assert.equal(outcome.success, false);
+    assert.match(outcome.error, /Standard receipt status 'success' does not establish native GenLayer finality/);
+    assert.throws(
+      () => verifyReceiptFinalizedSuccess(receiptOnly),
+      /Transaction was not finalized/
+    );
+  });
+
+  // 39. Pending native transaction is recognized and fails closed for immediate success
+  it("39. normalizeTransactionOutcome identifies pending native transaction (status 5 or statusName PENDING)", () => {
+    const pendingTx = { status: 5, statusName: "COMMITTING" };
+    const outcome = normalizeTransactionOutcome(pendingTx);
+    assert.equal(outcome.finalized, false);
+    assert.equal(outcome.isPending, true);
+    assert.equal(outcome.success, false);
+    assert.throws(
+      () => verifyReceiptFinalizedSuccess(pendingTx),
+      /Transaction was not finalized/
+    );
+  });
+
+  // 40. Failed native execution is recognized and fails closed
+  it("40. normalizeTransactionOutcome identifies failed execution (status 7 + result 2)", () => {
+    const failedTx = { status: 7, txExecutionResult: 2, txExecutionResultName: "EXECUTION_FAILED" };
+    const outcome = normalizeTransactionOutcome(failedTx);
+    assert.equal(outcome.finalized, true);
+    assert.equal(outcome.success, false);
+    assert.equal(outcome.isExecutionFailed, true);
+    assert.throws(
+      () => verifyReceiptFinalizedSuccess(failedTx),
+      /Transaction execution failed closed/
+    );
+  });
+
+  // 41. Existing hash never causes writeContract resubmission
+  it("41. Existing hash never causes writeContract resubmission", async () => {
+    let writeCount = 0;
+    const evidenceState = {
+      contractAddress: REQUIRED_CONTRACT_ADDRESS,
+      cases: {
+        success: {
+          escrowId: "0xescrow_success",
+          writeInputs: {
+            template: "NPM_VERSION",
+            package: "controlled-pkg-alpha",
+            version: "1.0.0",
+            expectedRepo: "controlled-org/controlled-repo",
+            expectedTag: "v1.0.0",
+            funder: validManifest.deployerAddress,
+            recipient: controlledConfig.recipientAddress,
+            nonce: "1001",
+            windowStartUtc: "2026-10-20T20:00:00Z",
+            windowEndUtc: "2026-10-22T20:00:00Z",
+          },
+          preEconomicsSnapshot: { escrowed_open: "0", paid_to_recipients: "0", refunded_to_funders: "0", outstanding_credits: "0", treasury: "0" },
+          postEconomicsSnapshot: { escrowed_open: "10000000000000000", paid_to_recipients: "0", refunded_to_funders: "0", outstanding_credits: "0", treasury: "0" },
+          onChainAudit: {
+            policy: "SOURCE_LINKED",
+            status: "OPEN",
+            match_reason: "LOOKBACK_404_OK",
+            template: "NPM_VERSION",
+            package_name: "controlled-pkg-alpha",
+            version: "1.0.0",
+            expected_repo: "controlled-org/controlled-repo",
+            expected_tag: "v1.0.0",
+            funder: validManifest.deployerAddress,
+            recipient: controlledConfig.recipientAddress,
+            amount: "10000000000000000",
+            nonce: "1001",
+            window_start_utc: "2026-10-20T20:00:00Z",
+            window_end_utc: "2026-10-22T20:00:00Z",
+            payout: "0",
+            refund: "0",
+          },
+          funding: {
+            txHash: "0xexisting_funding_hash",
+            status: "SUBMITTED",
+          },
+        },
+      },
+    };
+    writeFileSync(testEvidencePath, JSON.stringify(evidenceState, null, 2), "utf-8");
+
+    const mockClient = {
+      getTransactionReceipt: async () => ({ statusName: "FINALIZED", txExecutionResultName: "FINISHED_WITH_RETURN" }),
+      readContract: async ({ functionName }) => {
+        if (functionName === "get_escrow") {
+          return evidenceState.cases.success.onChainAudit;
+        }
+        return null;
+      },
+      writeContract: async () => {
+        writeCount++;
+        return "0xresubmitted_unwanted";
+      },
+    };
+
+    const res = await reconcileExistingFundingHash({
+      client: mockClient,
+      manifest: validManifest,
+      config: controlledConfig,
+      caseName: "success",
+      evidence: evidenceState,
+      evidencePath: testEvidencePath,
+      existingCase: evidenceState.cases.success,
+      expectedEscrowId: "0xescrow_success",
+    });
+
+    assert.equal(res.success, true);
+    assert.equal(res.reconciled, true);
+    assert.equal(writeCount, 0, "Zero writeContract calls during existing hash recovery");
+  });
+
+  // 42. Successful exclusive-state recovery when all invariants hold
+  it("42. Successful exclusive-state recovery when all exclusivity invariants hold", async () => {
+    const validEscrow = {
+      policy: "SOURCE_LINKED",
+      status: "OPEN",
+      match_reason: "LOOKBACK_404_OK",
+      template: "NPM_VERSION",
+      package_name: "controlled-pkg-alpha",
+      version: "1.0.0",
+      expected_repo: "controlled-org/controlled-repo",
+      expected_tag: "v1.0.0",
+      funder: validManifest.deployerAddress,
+      recipient: controlledConfig.recipientAddress,
+      amount: "10000000000000000",
+      nonce: "1001",
+      window_start_utc: "2026-10-20T20:00:00Z",
+      window_end_utc: "2026-10-22T20:00:00Z",
+      payout: "0",
+      refund: "0",
+    };
+
+    const evidenceState = {
+      contractAddress: REQUIRED_CONTRACT_ADDRESS,
+      cases: {
+        success: {
+          escrowId: "0xescrow_success",
+          writeInputs: {
+            template: "NPM_VERSION",
+            package: "controlled-pkg-alpha",
+            version: "1.0.0",
+            expectedRepo: "controlled-org/controlled-repo",
+            expectedTag: "v1.0.0",
+            funder: validManifest.deployerAddress,
+            recipient: controlledConfig.recipientAddress,
+            nonce: "1001",
+            windowStartUtc: "2026-10-20T20:00:00Z",
+            windowEndUtc: "2026-10-22T20:00:00Z",
+            amountWei: "10000000000000000",
+          },
+          preEconomicsSnapshot: { escrowed_open: "0", paid_to_recipients: "0", refunded_to_funders: "0", outstanding_credits: "0", treasury: "0" },
+          funding: {
+            txHash: "0xfund_success",
+            status: "SUBMITTED",
+          },
+        },
+        mismatch: null,
+      },
+      history: [],
+    };
+    writeFileSync(testEvidencePath, JSON.stringify(evidenceState, null, 2), "utf-8");
+
+    const mockClient = {
+      readContract: async ({ functionName }) => {
+        if (functionName === "get_escrow_ids") return ["0xescrow_success"];
+        if (functionName === "get_escrow") return validEscrow;
+        if (functionName === "get_economics") {
+          return {
+            escrowed_open: "10000000000000000",
+            paid_to_recipients: "0",
+            refunded_to_funders: "0",
+            outstanding_credits: "0",
+            treasury: "0",
+          };
+        }
+        return null;
+      },
+    };
+
+    const txOutcome = {
+      finalized: true,
+      success: true,
+      status: "FINALIZED",
+      executionResult: 1,
+    };
+
+    const res = await attemptExclusiveStateRecovery({
+      client: mockClient,
+      manifest: validManifest,
+      config: controlledConfig,
+      caseName: "success",
+      evidence: evidenceState,
+      evidencePath: testEvidencePath,
+      txOutcome,
+      checkAbsenceFn: async () => ({ passed: true }),
+    });
+
+    assert.equal(res.success, true);
+    assert.equal(res.proofStatus, "VERIFIED");
+    assert.equal(res.recovered, true);
+
+    const saved = readJsonSafe(testEvidencePath);
+    assert.equal(saved.cases.success.state, "VERIFIED");
+    assert.equal(saved.cases.success.funding.proofStatus, "VERIFIED");
+    assert.equal(saved.cases.success.captureMode, "EXCLUSIVE_STATE_RECOVERY");
+    assert.ok(saved.cases.success.recoveryObservedAtUtc);
+    assert.equal(saved.history.length, 1);
+    assert.equal(saved.history[0].action, "fund_verified_recovery");
+  });
+
+  // 43. Exclusive-state recovery rejected when >1 escrow exists
+  it("43. Exclusive-state recovery rejected when more than one escrow exists", async () => {
+    const evidenceState = {
+      contractAddress: REQUIRED_CONTRACT_ADDRESS,
+      cases: {
+        success: {
+          escrowId: "0xescrow_success",
+          writeInputs: { nonce: "1001", amountWei: "10000000000000000" },
+          preEconomicsSnapshot: { escrowed_open: "0", paid_to_recipients: "0", refunded_to_funders: "0", outstanding_credits: "0", treasury: "0" },
+          funding: { txHash: "0xfund1" },
+        },
+      },
+      history: [],
+    };
+    writeFileSync(testEvidencePath, JSON.stringify(evidenceState, null, 2), "utf-8");
+
+    const mockClient = {
+      readContract: async ({ functionName }) => {
+        if (functionName === "get_escrow_ids") return ["0xescrow_success", "0xunrelated_escrow"];
+        return null;
+      },
+    };
+
+    const res = await attemptExclusiveStateRecovery({
+      client: mockClient,
+      manifest: validManifest,
+      config: controlledConfig,
+      caseName: "success",
+      evidence: evidenceState,
+      evidencePath: testEvidencePath,
+      txOutcome: { finalized: true, success: true },
+      checkAbsenceFn: async () => ({ passed: true }),
+    });
+
+    assert.equal(res.success, false);
+    assert.equal(res.assertions.singleEscrowCount.passed, false);
+    assert.equal(res.assertions.singleEscrowCount.observed, 2);
+
+    const saved = readJsonSafe(testEvidencePath);
+    assert.equal(saved.cases.success.funding.proofStatus, "PROOF_INCOMPLETE");
+  });
+
+  // 44. Exclusive-state recovery rejected for unexpected escrow ID
+  it("44. Exclusive-state recovery rejected for unexpected escrow ID", async () => {
+    const evidenceState = {
+      contractAddress: REQUIRED_CONTRACT_ADDRESS,
+      cases: {
+        success: {
+          escrowId: "0xescrow_success",
+          writeInputs: { nonce: "1001", amountWei: "10000000000000000" },
+          preEconomicsSnapshot: { escrowed_open: "0", paid_to_recipients: "0", refunded_to_funders: "0", outstanding_credits: "0", treasury: "0" },
+          funding: { txHash: "0xfund1" },
+        },
+      },
+      history: [],
+    };
+    writeFileSync(testEvidencePath, JSON.stringify(evidenceState, null, 2), "utf-8");
+
+    const mockClient = {
+      readContract: async ({ functionName }) => {
+        if (functionName === "get_escrow_ids") return ["0xforeign_escrow_id"];
+        return null;
+      },
+    };
+
+    const res = await attemptExclusiveStateRecovery({
+      client: mockClient,
+      manifest: validManifest,
+      config: controlledConfig,
+      caseName: "success",
+      evidence: evidenceState,
+      evidencePath: testEvidencePath,
+      txOutcome: { finalized: true, success: true },
+      checkAbsenceFn: async () => ({ passed: true }),
+    });
+
+    assert.equal(res.success, false);
+    assert.equal(res.assertions.singleEscrowIdMatch.passed, false);
+    assert.equal(res.assertions.singleEscrowIdMatch.observed, "0xforeign_escrow_id");
+  });
+
+  // 45. Exclusive-state recovery rejected for nonzero unrelated economics
+  it("45. Exclusive-state recovery rejected for nonzero unrelated economics", async () => {
+    const evidenceState = {
+      contractAddress: REQUIRED_CONTRACT_ADDRESS,
+      cases: {
+        success: {
+          escrowId: "0xescrow_success",
+          writeInputs: {
+            template: "NPM_VERSION",
+            package: "controlled-pkg-alpha",
+            version: "1.0.0",
+            expectedRepo: "controlled-org/controlled-repo",
+            expectedTag: "v1.0.0",
+            funder: validManifest.deployerAddress,
+            recipient: controlledConfig.recipientAddress,
+            nonce: "1001",
+            windowStartUtc: "2026-10-20T20:00:00Z",
+            windowEndUtc: "2026-10-22T20:00:00Z",
+            amountWei: "10000000000000000",
+          },
+          preEconomicsSnapshot: { escrowed_open: "0", paid_to_recipients: "0", refunded_to_funders: "0", outstanding_credits: "0", treasury: "0" },
+          funding: { txHash: "0xfund1" },
+        },
+      },
+      history: [],
+    };
+    writeFileSync(testEvidencePath, JSON.stringify(evidenceState, null, 2), "utf-8");
+
+    const mockClient = {
+      readContract: async ({ functionName }) => {
+        if (functionName === "get_escrow_ids") return ["0xescrow_success"];
+        if (functionName === "get_escrow") {
+          return {
+            policy: "SOURCE_LINKED",
+            status: "OPEN",
+            match_reason: "LOOKBACK_404_OK",
+            template: "NPM_VERSION",
+            package_name: "controlled-pkg-alpha",
+            version: "1.0.0",
+            expected_repo: "controlled-org/controlled-repo",
+            expected_tag: "v1.0.0",
+            funder: validManifest.deployerAddress,
+            recipient: controlledConfig.recipientAddress,
+            amount: "10000000000000000",
+            nonce: "1001",
+            window_start_utc: "2026-10-20T20:00:00Z",
+            window_end_utc: "2026-10-22T20:00:00Z",
+          };
+        }
+        if (functionName === "get_economics") {
+          // Unrelated activity: paid_to_recipients has 5000000000000000 wei
+          return {
+            escrowed_open: "10000000000000000",
+            paid_to_recipients: "5000000000000000",
+            refunded_to_funders: "0",
+            outstanding_credits: "0",
+            treasury: "0",
+          };
+        }
+        return null;
+      },
+    };
+
+    const res = await attemptExclusiveStateRecovery({
+      client: mockClient,
+      manifest: validManifest,
+      config: controlledConfig,
+      caseName: "success",
+      evidence: evidenceState,
+      evidencePath: testEvidencePath,
+      txOutcome: { finalized: true, success: true },
+      checkAbsenceFn: async () => ({ passed: true }),
+    });
+
+    assert.equal(res.success, false);
+    assert.equal(res.assertions.currentEconomicsMatch.passed, false);
+    assert.equal(evidenceState.cases.success.funding.proofStatus, "PROOF_INCOMPLETE");
+  });
+
+  // 46. Exclusive-state recovery rejected for immutable identity mismatch
+  it("46. Exclusive-state recovery rejected for immutable identity mismatch", async () => {
+    const evidenceState = {
+      contractAddress: REQUIRED_CONTRACT_ADDRESS,
+      cases: {
+        success: {
+          escrowId: "0xescrow_success",
+          writeInputs: {
+            template: "NPM_VERSION",
+            package: "controlled-pkg-alpha",
+            version: "1.0.0",
+            expectedRepo: "controlled-org/controlled-repo",
+            expectedTag: "v1.0.0",
+            funder: validManifest.deployerAddress,
+            recipient: controlledConfig.recipientAddress,
+            nonce: "1001",
+            windowStartUtc: "2026-10-20T20:00:00Z",
+            windowEndUtc: "2026-10-22T20:00:00Z",
+            amountWei: "10000000000000000",
+          },
+          preEconomicsSnapshot: { escrowed_open: "0", paid_to_recipients: "0", refunded_to_funders: "0", outstanding_credits: "0", treasury: "0" },
+          funding: { txHash: "0xfund1" },
+        },
+      },
+      history: [],
+    };
+    writeFileSync(testEvidencePath, JSON.stringify(evidenceState, null, 2), "utf-8");
+
+    const mockClient = {
+      readContract: async ({ functionName }) => {
+        if (functionName === "get_escrow_ids") return ["0xescrow_success"];
+        if (functionName === "get_escrow") {
+          return {
+            policy: "SOURCE_LINKED",
+            status: "OPEN",
+            match_reason: "LOOKBACK_404_OK",
+            template: "NPM_VERSION",
+            package_name: "controlled-pkg-alpha",
+            version: "1.0.0",
+            expected_repo: "controlled-org/controlled-repo",
+            expected_tag: "v1.0.0",
+            funder: validManifest.deployerAddress,
+            recipient: "0x9999999999999999999999999999999999999999", // Mismatch recipient!
+            amount: "10000000000000000",
+            nonce: "1001",
+            window_start_utc: "2026-10-20T20:00:00Z",
+            window_end_utc: "2026-10-22T20:00:00Z",
+          };
+        }
+        return null;
+      },
+    };
+
+    const res = await attemptExclusiveStateRecovery({
+      client: mockClient,
+      manifest: validManifest,
+      config: controlledConfig,
+      caseName: "success",
+      evidence: evidenceState,
+      evidencePath: testEvidencePath,
+      txOutcome: { finalized: true, success: true },
+      checkAbsenceFn: async () => ({ passed: true }),
+    });
+
+    assert.equal(res.success, false);
+    assert.equal(res.assertions.immutableIdentityMatch.passed, false);
+    assert.equal(evidenceState.cases.success.funding.proofStatus, "PROOF_INCOMPLETE");
+  });
+
+  // 47. Exclusive-state recovery rejected if MISMATCH already exists
+  it("47. Exclusive-state recovery rejected if MISMATCH already exists", async () => {
+    const evidenceState = {
+      contractAddress: REQUIRED_CONTRACT_ADDRESS,
+      cases: {
+        success: {
+          escrowId: "0xescrow_success",
+          writeInputs: { nonce: "1001", amountWei: "10000000000000000" },
+          preEconomicsSnapshot: { escrowed_open: "0", paid_to_recipients: "0", refunded_to_funders: "0", outstanding_credits: "0", treasury: "0" },
+          funding: { txHash: "0xfund1" },
+        },
+        mismatch: {
+          state: "VERIFIED",
+          funding: { txHash: "0xfund_mismatch" },
+        },
+      },
+      history: [],
+    };
+    writeFileSync(testEvidencePath, JSON.stringify(evidenceState, null, 2), "utf-8");
+
+    const mockClient = {
+      readContract: async ({ functionName }) => {
+        if (functionName === "get_escrow_ids") return ["0xescrow_success"];
+        return null;
+      },
+    };
+
+    const res = await attemptExclusiveStateRecovery({
+      client: mockClient,
+      manifest: validManifest,
+      config: controlledConfig,
+      caseName: "success",
+      evidence: evidenceState,
+      evidencePath: testEvidencePath,
+      txOutcome: { finalized: true, success: true },
+      checkAbsenceFn: async () => ({ passed: true }),
+    });
+
+    assert.equal(res.success, false);
+    assert.equal(res.assertions.mismatchUnfunded.passed, false);
+  });
+
+  // 48. History remains idempotent across repeated reconciliation
+  it("48. History remains idempotent across repeated reconciliation", async () => {
+    const validEscrow = {
+      policy: "SOURCE_LINKED",
+      status: "OPEN",
+      match_reason: "LOOKBACK_404_OK",
+      template: "NPM_VERSION",
+      package_name: "controlled-pkg-alpha",
+      version: "1.0.0",
+      expected_repo: "controlled-org/controlled-repo",
+      expected_tag: "v1.0.0",
+      funder: validManifest.deployerAddress,
+      recipient: controlledConfig.recipientAddress,
+      amount: "10000000000000000",
+      nonce: "1001",
+      window_start_utc: "2026-10-20T20:00:00Z",
+      window_end_utc: "2026-10-22T20:00:00Z",
+      payout: "0",
+      refund: "0",
+    };
+
+    const evidenceState = {
+      contractAddress: REQUIRED_CONTRACT_ADDRESS,
+      cases: {
+        success: {
+          escrowId: "0xescrow_success",
+          writeInputs: {
+            template: "NPM_VERSION",
+            package: "controlled-pkg-alpha",
+            version: "1.0.0",
+            expectedRepo: "controlled-org/controlled-repo",
+            expectedTag: "v1.0.0",
+            funder: validManifest.deployerAddress,
+            recipient: controlledConfig.recipientAddress,
+            nonce: "1001",
+            windowStartUtc: "2026-10-20T20:00:00Z",
+            windowEndUtc: "2026-10-22T20:00:00Z",
+            amountWei: "10000000000000000",
+          },
+          preEconomicsSnapshot: { escrowed_open: "0", paid_to_recipients: "0", refunded_to_funders: "0", outstanding_credits: "0", treasury: "0" },
+          funding: {
+            txHash: "0xfund_success",
+            status: "SUBMITTED",
+          },
+        },
+        mismatch: null,
+      },
+      history: [],
+    };
+    writeFileSync(testEvidencePath, JSON.stringify(evidenceState, null, 2), "utf-8");
+
+    const mockClient = {
+      getTransactionReceipt: async () => ({ statusName: "FINALIZED", txExecutionResultName: "FINISHED_WITH_RETURN" }),
+      readContract: async ({ functionName }) => {
+        if (functionName === "get_escrow_ids") return ["0xescrow_success"];
+        if (functionName === "get_escrow") return validEscrow;
+        if (functionName === "get_economics") {
+          return {
+            escrowed_open: "10000000000000000",
+            paid_to_recipients: "0",
+            refunded_to_funders: "0",
+            outstanding_credits: "0",
+            treasury: "0",
+          };
+        }
+        return null;
+      },
+    };
+
+    // First reconciliation
+    await runReconcile({
+      client: mockClient,
+      manifest: validManifest,
+      config: controlledConfig,
+      evidencePath: testEvidencePath,
+      checkAbsenceFn: async () => ({ passed: true }),
+    });
+
+    let saved = readJsonSafe(testEvidencePath);
+    assert.equal(saved.history.filter((h) => h.action === "fund_verified_recovery").length, 1);
+
+    // Second reconciliation (repeated)
+    await runReconcile({
+      client: mockClient,
+      manifest: validManifest,
+      config: controlledConfig,
+      evidencePath: testEvidencePath,
+      checkAbsenceFn: async () => ({ passed: true }),
+    });
+
+    saved = readJsonSafe(testEvidencePath);
+    assert.equal(saved.history.filter((h) => h.action === "fund_verified_recovery").length, 1, "History event is not duplicated");
+  });
+
+  // 49. Release reconciliation uses the same normalized transaction outcome
+  it("49. Release reconciliation uses the same normalized transaction outcome", async () => {
+    const evidenceState = {
+      contractAddress: REQUIRED_CONTRACT_ADDRESS,
+      cases: {
+        success: {
+          escrowId: "0xescrow_success",
+          funding: { state: "VERIFIED", proofStatus: "VERIFIED" },
+          release: {
+            txHash: "0xrel_success",
+            preEscrowSnapshot: { status: "OPEN" },
+            preEconomicsSnapshot: { escrowed_open: "10000000000000000", paid_to_recipients: "0", refunded_to_funders: "0" },
+            postEconomicsSnapshot: { escrowed_open: "0", paid_to_recipients: "10000000000000000", refunded_to_funders: "0" },
+          },
+        },
+      },
+      history: [],
+    };
+    writeFileSync(testEvidencePath, JSON.stringify(evidenceState, null, 2), "utf-8");
+
+    // Client provides native numeric status 7 + result 1 in getTransaction
+    const mockClient = {
+      getTransaction: async () => ({ status: 7, last_round: { result: 1 } }),
+      getTransactionReceipt: async () => ({ status: "success" }),
+      readContract: async ({ functionName }) => {
+        if (functionName === "get_escrow") {
+          return {
+            status: "RELEASED",
+            match_reason: "VERIFIED_RELEASE",
+            payout: "10000000000000000",
+            recipient: controlledConfig.recipientAddress,
+          };
+        }
+        return null;
+      },
+    };
+
+    const res = await runReconcile({
+      client: mockClient,
+      manifest: validManifest,
+      config: controlledConfig,
+      evidencePath: testEvidencePath,
+      verifyTransferFn: async () => ({ messageEmitted: true, fundsDelivered: true }),
+    });
+
+    assert.equal(res.inspected, 1);
+    assert.equal(res.verified, 1);
+
+    const saved = readJsonSafe(testEvidencePath);
+    assert.equal(saved.cases.success.release.state, "VERIFIED");
+    assert.equal(saved.cases.success.release.proofStatus, "VERIFIED");
+  });
+
+  // 50. runFund: wait returns {status:"success"} and getTransaction returns native status 7/result 1; funding completes VERIFIED
+  it("50. runFund: wait returns {status:'success'} and getTransaction returns native status 7/result 1; funding completes VERIFIED", async () => {
+    process.env.SHIPLOCK_LIVE_WRITE = "YES";
+    try {
+      let writeCount = 0;
+      let fundArgs = [];
+      const testTxHash = "0xfund_tx_50";
+
+      const mockWriteClient = {
+        getBalance: async () => 2000000000000000000n,
+        estimateTransactionFees: async () => ({
+          distribution: { leaderTimeunitsAllocation: 200n, validatorTimeunitsAllocation: 400n },
+          feeValue: 5000000000000n,
+        }),
+        writeContract: async ({ args }) => {
+          writeCount++;
+          fundArgs = args;
+          return testTxHash;
+        },
+        waitForTransactionReceipt: async () => ({
+          status: "success",
+          transactionHash: testTxHash,
+        }),
+        getTransaction: async ({ hash }) => {
+          assert.equal(hash, testTxHash);
+          return { status: 7, last_round: { result: 1 } };
+        },
+        readContract: async ({ functionName }) => {
+          if (functionName === "get_escrow_ids") {
+            if (writeCount === 0) return [];
+            return [
+              deriveV2EscrowId({
+                funder: validManifest.deployerAddress,
+                recipient: controlledConfig.recipientAddress,
+                template: controlledConfig.cases.success.template,
+                package_name: controlledConfig.cases.success.package,
+                version: controlledConfig.cases.success.version,
+                expected_repo: controlledConfig.cases.success.expectedRepo,
+                expected_tag: controlledConfig.cases.success.expectedTag,
+                window_start_utc: fundArgs[6],
+                window_end_utc: fundArgs[7],
+                amount_wei: PRINCIPAL_PER_ESCROW_WEI,
+                nonce: controlledConfig.cases.success.nonce,
+              }),
+            ];
+          }
+          if (functionName === "get_escrow") {
+            return {
+              policy: "SOURCE_LINKED",
+              status: "OPEN",
+              match_reason: "LOOKBACK_404_OK",
+              expected_repo: controlledConfig.cases.success.expectedRepo.toLowerCase(),
+              expected_tag: controlledConfig.cases.success.expectedTag,
+              template: controlledConfig.cases.success.template,
+              package_name: controlledConfig.cases.success.package,
+              version: controlledConfig.cases.success.version,
+              funder: validManifest.deployerAddress,
+              recipient: controlledConfig.recipientAddress,
+              amount: PRINCIPAL_PER_ESCROW_WEI.toString(),
+              nonce: controlledConfig.cases.success.nonce,
+              window_start_utc: fundArgs[6],
+              window_end_utc: fundArgs[7],
+              payout: "0",
+              refund: "0",
+            };
+          }
+          if (functionName === "get_economics") {
+            return writeCount === 0
+              ? { escrowed_open: "0", paid_to_recipients: "0", refunded_to_funders: "0", outstanding_credits: "0", treasury: "0" }
+              : { escrowed_open: "10000000000000000", paid_to_recipients: "0", refunded_to_funders: "0", outstanding_credits: "0", treasury: "0" };
+          }
+          return null;
+        },
+      };
+
+      const res = await runFund({
+        client: mockWriteClient,
+        manifest: validManifest,
+        config: controlledConfig,
+        caseName: "success",
+        evidencePath: testEvidencePath,
+        deployerAccount: { address: validManifest.deployerAddress },
+        queryRegistryFn: async () => ({ exists: false }),
+        queryGithubFn: async () => ({ exists: false }),
+      });
+
+      assert.equal(writeCount, 1, "Exactly 1 writeContract call");
+      assert.equal(res.success, true);
+      assert.equal(res.txHash, testTxHash);
+
+      const saved = readJsonSafe(testEvidencePath);
+      assert.equal(saved.cases.success.state, "VERIFIED");
+      assert.equal(saved.cases.success.funding.status, "FINALIZED");
+      assert.equal(saved.cases.success.funding.txHash, testTxHash);
+    } finally {
+      delete process.env.SHIPLOCK_LIVE_WRITE;
+    }
+  });
+
+  // 51. runRelease: wait returns {status:"success"} and getTransaction returns native status 7/result 1; release proceeds to its verified result
+  it("51. runRelease: wait returns {status:'success'} and getTransaction returns native status 7/result 1; release proceeds to its verified result", async () => {
+    process.env.SHIPLOCK_LIVE_WRITE = "YES";
+    try {
+      let writeCount = 0;
+      const testReleaseTxHash = "0xrel_tx_51";
+      const testEscrowId = "0xescrow_51";
+
+      const evidenceState = {
+        contractAddress: REQUIRED_CONTRACT_ADDRESS,
+        cases: {
+          success: {
+            escrowId: testEscrowId,
+            state: "VERIFIED",
+            funding: { state: "VERIFIED", proofStatus: "VERIFIED", txHash: "0xfund_tx_51" },
+            release: {
+              state: "UNFUNDED",
+              preEscrowSnapshot: { status: "OPEN" },
+              preEconomicsSnapshot: { escrowed_open: "10000000000000000", paid_to_recipients: "0", refunded_to_funders: "0" },
+              postEconomicsSnapshot: { escrowed_open: "0", paid_to_recipients: "10000000000000000", refunded_to_funders: "0" },
+            },
+          },
+        },
+        history: [],
+      };
+      writeFileSync(testEvidencePath, JSON.stringify(evidenceState, null, 2), "utf-8");
+
+      const completeAllocations = buildV2ReleaseAllocations({
+        recipient: controlledConfig.recipientAddress,
+        funder: validManifest.deployerAddress,
+        budget: 150000000000000n,
+      });
+
+      const mockWriteClient = {
+        estimateTransactionFees: async () => ({
+          distribution: { leaderTimeunitsAllocation: 200n, validatorTimeunitsAllocation: 400n },
+          feeValue: 5000000000000n,
+          messageAllocations: completeAllocations,
+        }),
+        writeContract: async () => {
+          writeCount++;
+          return testReleaseTxHash;
+        },
+        waitForTransactionReceipt: async () => ({
+          status: "success",
+          transactionHash: testReleaseTxHash,
+        }),
+        getTransaction: async ({ hash }) => {
+          assert.equal(hash, testReleaseTxHash);
+          return { status: 7, last_round: { result: 1 } };
+        },
+        readContract: async ({ functionName }) => {
+          if (functionName === "get_escrow") {
+            return {
+              status: writeCount > 0 ? "RELEASED" : "OPEN",
+              match_reason: writeCount > 0 ? "VERIFIED_RELEASE" : "",
+              payout: writeCount > 0 ? "10000000000000000" : "0",
+              refund: "0",
+              expected_repo: "controlled-org/controlled-repo",
+              expected_tag: "v1.0.0",
+              template: "NPM_VERSION",
+              package_name: "controlled-pkg-alpha",
+              version: "1.0.0",
+              window_start_utc: "2026-01-01T00:00:00Z",
+              window_end_utc: "2026-06-01T00:00:00Z",
+              expire_at_utc: "2026-07-01T00:00:00Z",
+              recipient: controlledConfig.recipientAddress,
+              funder: validManifest.deployerAddress,
+            };
+          }
+          if (functionName === "get_economics") {
+            return writeCount > 0
+              ? { escrowed_open: "0", paid_to_recipients: "10000000000000000", refunded_to_funders: "0", outstanding_credits: "0", treasury: "0" }
+              : { escrowed_open: "10000000000000000", paid_to_recipients: "0", refunded_to_funders: "0", outstanding_credits: "0", treasury: "0" };
+          }
+          return null;
+        },
+      };
+
+      const res = await runRelease({
+        client: mockWriteClient,
+        manifest: validManifest,
+        config: controlledConfig,
+        caseName: "success",
+        evidencePath: testEvidencePath,
+        submitterAccount: { address: "0x2222222222222222222222222222222222222222" },
+        getRpcTimeFn: async () => new Date("2026-06-02T00:00:00Z"),
+        queryRegistryFn: async () => ({ exists: true, statusCode: 200, kind: "200", isYanked: false, publishTime: "2026-06-01T00:00:00Z", normalizedRepo: "controlled-org/controlled-repo" }),
+        queryGithubFn: async () => ({ exists: true, status_code: 200, kind: "200", draft: false, prerelease: false, tag_name: "v1.0.0", published_utc: "2026-06-01T00:00:00Z" }),
+        verifyTransferFn: async () => ({ messageEmitted: true, fundsDelivered: true }),
+      });
+
+      assert.equal(writeCount, 1, "Exactly 1 writeContract call");
+      assert.equal(res.success, true);
+      assert.equal(res.txHash, testReleaseTxHash);
+
+      const saved = readJsonSafe(testEvidencePath);
+      assert.equal(saved.cases.success.release.state, "VERIFIED");
+    } finally {
+      delete process.env.SHIPLOCK_LIVE_WRITE;
+    }
+  });
+
+  // 52. Existing funding hash: getTransactionReceipt returns standard success while getTransaction returns native finalized success; recovery succeeds with zero writes
+  it("52. Existing funding hash: getTransactionReceipt returns standard success while getTransaction returns native finalized success; recovery succeeds with zero writes", async () => {
+    let writeCount = 0;
+    const testTxHash = "0xexisting_funding_52";
+    const testEscrowId = "0xescrow_52";
+
+    const validEscrow = {
+      policy: "SOURCE_LINKED",
+      status: "OPEN",
+      match_reason: "LOOKBACK_404_OK",
+      template: "NPM_VERSION",
+      package_name: "controlled-pkg-alpha",
+      version: "1.0.0",
+      expected_repo: "controlled-org/controlled-repo",
+      expected_tag: "v1.0.0",
+      funder: validManifest.deployerAddress,
+      recipient: controlledConfig.recipientAddress,
+      amount: "10000000000000000",
+      nonce: "1001",
+      window_start_utc: "2026-10-20T20:00:00Z",
+      window_end_utc: "2026-10-22T20:00:00Z",
+      payout: "0",
+      refund: "0",
+    };
+
+    const evidenceState = {
+      contractAddress: REQUIRED_CONTRACT_ADDRESS,
+      cases: {
+        success: {
+          escrowId: testEscrowId,
+          writeInputs: {
+            template: "NPM_VERSION",
+            package: "controlled-pkg-alpha",
+            version: "1.0.0",
+            expectedRepo: "controlled-org/controlled-repo",
+            expectedTag: "v1.0.0",
+            funder: validManifest.deployerAddress,
+            recipient: controlledConfig.recipientAddress,
+            nonce: "1001",
+            windowStartUtc: "2026-10-20T20:00:00Z",
+            windowEndUtc: "2026-10-22T20:00:00Z",
+          },
+          preEconomicsSnapshot: { escrowed_open: "0", paid_to_recipients: "0", refunded_to_funders: "0", outstanding_credits: "0", treasury: "0" },
+          postEconomicsSnapshot: { escrowed_open: "10000000000000000", paid_to_recipients: "0", refunded_to_funders: "0", outstanding_credits: "0", treasury: "0" },
+          onChainAudit: validEscrow,
+          funding: {
+            txHash: testTxHash,
+            status: "SUBMITTED",
+          },
+        },
+      },
+      history: [],
+    };
+    writeFileSync(testEvidencePath, JSON.stringify(evidenceState, null, 2), "utf-8");
+
+    const mockClient = {
+      getTransactionReceipt: async () => ({ status: "success", transactionHash: testTxHash }),
+      getTransaction: async () => ({ status: 7, last_round: { result: 1 } }),
+      readContract: async ({ functionName }) => {
+        if (functionName === "get_escrow") return validEscrow;
+        return null;
+      },
+      writeContract: async () => {
+        writeCount++;
+        throw new Error("Duplicate writeContract forbidden");
+      },
+    };
+
+    const res = await reconcileExistingFundingHash({
+      client: mockClient,
+      manifest: validManifest,
+      config: controlledConfig,
+      caseName: "success",
+      evidence: evidenceState,
+      evidencePath: testEvidencePath,
+      existingCase: evidenceState.cases.success,
+      expectedEscrowId: testEscrowId,
+    });
+
+    assert.equal(writeCount, 0, "Zero writeContract calls during existing hash recovery");
+    assert.equal(res.success, true);
+    assert.equal(res.reconciled, true);
+    assert.equal(evidenceState.cases.success.state, "VERIFIED");
+  });
+
+  // 53. Existing release hash: same standard/native split; recovery succeeds with zero writes
+  it("53. Existing release hash: standard success receipt + native finalized success; recovery succeeds with zero writes", async () => {
+    process.env.SHIPLOCK_LIVE_WRITE = "YES";
+    let writeCount = 0;
+    const testReleaseTx = "0xexisting_rel_53";
+    const testEscrowId = "0xescrow_53";
+
+    const evidenceState = {
+      contractAddress: REQUIRED_CONTRACT_ADDRESS,
+      cases: {
+        success: {
+          escrowId: testEscrowId,
+          funding: { state: "VERIFIED", proofStatus: "VERIFIED" },
+          release: {
+            txHash: testReleaseTx,
+            preEscrowSnapshot: { status: "OPEN" },
+            preEconomicsSnapshot: { escrowed_open: "10000000000000000", paid_to_recipients: "0", refunded_to_funders: "0" },
+            postEconomicsSnapshot: { escrowed_open: "0", paid_to_recipients: "10000000000000000", refunded_to_funders: "0" },
+          },
+        },
+      },
+      history: [],
+    };
+    writeFileSync(testEvidencePath, JSON.stringify(evidenceState, null, 2), "utf-8");
+
+    const mockClient = {
+      getTransactionReceipt: async () => ({ status: "success", transactionHash: testReleaseTx }),
+      getTransaction: async () => ({ status: 7, last_round: { result: 1 } }),
+      readContract: async ({ functionName }) => {
+        if (functionName === "get_escrow") {
+          return {
+            status: "RELEASED",
+            match_reason: "VERIFIED_RELEASE",
+            payout: "10000000000000000",
+            recipient: controlledConfig.recipientAddress,
+            funder: validManifest.deployerAddress,
+          };
+        }
+        return null;
+      },
+      writeContract: async () => {
+        writeCount++;
+        throw new Error("Duplicate writeContract forbidden");
+      },
+    };
+
+    const res = await runRelease({
+      client: mockClient,
+      manifest: validManifest,
+      config: controlledConfig,
+      caseName: "success",
+      evidencePath: testEvidencePath,
+      verifyTransferFn: async () => ({ messageEmitted: true, fundsDelivered: true }),
+    });
+
+    assert.equal(writeCount, 0, "Zero writeContract calls during existing release hash recovery");
+    assert.equal(res.success, true);
+    assert.equal(res.reconciled, true);
+    assert.equal(res.state, "VERIFIED");
+  });
+
+  // 54. Standard success receipt with unavailable native transaction remains fail-closed
+  it("54. Standard success receipt with unavailable native transaction remains fail-closed", async () => {
+    let writeCount = 0;
+    const mockClient = {
+      getTransactionReceipt: async () => ({ status: "success", transactionHash: "0xhash_54" }),
+      getTransaction: async () => null,
+      writeContract: async () => {
+        writeCount++;
+        throw new Error("Write forbidden");
+      },
+    };
+
+    const outcome = await getTransactionOutcome(mockClient, "0xhash_54");
+    assert.equal(outcome.finalized, false);
+    assert.equal(outcome.success, false);
+    assert.throws(
+      () => verifyAuthoritativeOutcome(outcome),
+      /Transaction was not finalized/
+    );
+
+    const evidenceState = {
+      contractAddress: REQUIRED_CONTRACT_ADDRESS,
+      cases: {
+        success: {
+          funding: { txHash: "0xhash_54", status: "SUBMITTED" },
+        },
+      },
+    };
+    writeFileSync(testEvidencePath, JSON.stringify(evidenceState, null, 2), "utf-8");
+
+    const res = await reconcileExistingFundingHash({
+      client: mockClient,
+      manifest: validManifest,
+      config: controlledConfig,
+      caseName: "success",
+      evidence: evidenceState,
+      evidencePath: testEvidencePath,
+      existingCase: evidenceState.cases.success,
+      expectedEscrowId: "0xescrow_54",
+    });
+
+    assert.equal(writeCount, 0, "Zero writes when native transaction unavailable");
+    assert.equal(res.success, false);
+    assert.equal(res.proofStatus, "PENDING_FINALIZATION");
+  });
+
+  // 55. Native pending result preserves PENDING_FINALIZATION
+  it("55. Native pending result preserves PENDING_FINALIZATION", async () => {
+    let writeCount = 0;
+    const testHash = "0xpending_hash_55";
+    const mockClient = {
+      getTransactionReceipt: async () => ({ status: "success", transactionHash: testHash }),
+      getTransaction: async () => ({ status: 5, statusName: "COMMITTING" }),
+      writeContract: async () => {
+        writeCount++;
+        throw new Error("Write forbidden");
+      },
+    };
+
+    const evidenceState = {
+      contractAddress: REQUIRED_CONTRACT_ADDRESS,
+      cases: {
+        success: {
+          funding: { txHash: testHash, status: "SUBMITTED" },
+        },
+      },
+    };
+    writeFileSync(testEvidencePath, JSON.stringify(evidenceState, null, 2), "utf-8");
+
+    const res = await reconcileExistingFundingHash({
+      client: mockClient,
+      manifest: validManifest,
+      config: controlledConfig,
+      caseName: "success",
+      evidence: evidenceState,
+      evidencePath: testEvidencePath,
+      existingCase: evidenceState.cases.success,
+      expectedEscrowId: "0xescrow_55",
+    });
+
+    assert.equal(writeCount, 0, "Zero writes on pending result");
+    assert.equal(res.success, false);
+    assert.equal(res.state, "PENDING");
+    assert.equal(res.proofStatus, "PENDING_FINALIZATION");
+
+    const saved = readJsonSafe(testEvidencePath);
+    assert.equal(saved.cases.success.state, "PENDING");
+    assert.equal(saved.cases.success.funding.proofStatus, "PENDING_FINALIZATION");
+    assert.equal(saved.cases.success.funding.txHash, testHash);
+  });
+
+  // 56. Native failed execution becomes FINALIZED_FAILED
+  it("56. Native failed execution becomes FINALIZED_FAILED", async () => {
+    let writeCount = 0;
+    const testHash = "0xfailed_hash_56";
+    const mockClient = {
+      getTransactionReceipt: async () => null,
+      getTransaction: async () => ({ status: 7, txExecutionResult: 2, txExecutionResultName: "EXECUTION_FAILED" }),
+      writeContract: async () => {
+        writeCount++;
+        throw new Error("Write forbidden");
+      },
+    };
+
+    const evidenceState = {
+      contractAddress: REQUIRED_CONTRACT_ADDRESS,
+      cases: {
+        success: {
+          funding: { txHash: testHash, status: "SUBMITTED" },
+        },
+      },
+    };
+    writeFileSync(testEvidencePath, JSON.stringify(evidenceState, null, 2), "utf-8");
+
+    const res = await reconcileExistingFundingHash({
+      client: mockClient,
+      manifest: validManifest,
+      config: controlledConfig,
+      caseName: "success",
+      evidence: evidenceState,
+      evidencePath: testEvidencePath,
+      existingCase: evidenceState.cases.success,
+      expectedEscrowId: "0xescrow_56",
+    });
+
+    assert.equal(writeCount, 0, "Zero writes on failed execution");
+    assert.equal(res.success, false);
+    assert.equal(res.state, "FINALIZED_FAILED");
+    assert.equal(res.proofStatus, "EXECUTION_FAILED");
+
+    const saved = readJsonSafe(testEvidencePath);
+    assert.equal(saved.cases.success.state, "FINALIZED_FAILED");
+    assert.equal(saved.cases.success.funding.proofStatus, "EXECUTION_FAILED");
+  });
+
+  // 57. Timeout followed by native finalized success recovers without resubmission
+  it("57. Timeout followed by native finalized success recovers without resubmission", async () => {
+    process.env.SHIPLOCK_LIVE_WRITE = "YES";
+    try {
+      let writeCount = 0;
+      let fundArgs = [];
+      const testTxHash = "0xfund_timeout_57";
+
+      const mockWriteClient = {
+        getBalance: async () => 2000000000000000000n,
+        estimateTransactionFees: async () => ({
+          distribution: { leaderTimeunitsAllocation: 200n, validatorTimeunitsAllocation: 400n },
+          feeValue: 5000000000000n,
+        }),
+        writeContract: async ({ args }) => {
+          writeCount++;
+          fundArgs = args;
+          return testTxHash;
+        },
+        waitForTransactionReceipt: async () => {
+          throw new Error("Transaction receipt timed out after maximum retries");
+        },
+        getTransactionReceipt: async () => ({
+          status: "success",
+          transactionHash: testTxHash,
+        }),
+        getTransaction: async () => ({
+          status: 7,
+          last_round: { result: 1 },
+        }),
+        readContract: async ({ functionName }) => {
+          if (functionName === "get_escrow_ids") {
+            if (writeCount === 0) return [];
+            return [
+              deriveV2EscrowId({
+                funder: validManifest.deployerAddress,
+                recipient: controlledConfig.recipientAddress,
+                template: controlledConfig.cases.success.template,
+                package_name: controlledConfig.cases.success.package,
+                version: controlledConfig.cases.success.version,
+                expected_repo: controlledConfig.cases.success.expectedRepo,
+                expected_tag: controlledConfig.cases.success.expectedTag,
+                window_start_utc: fundArgs[6],
+                window_end_utc: fundArgs[7],
+                amount_wei: PRINCIPAL_PER_ESCROW_WEI,
+                nonce: controlledConfig.cases.success.nonce,
+              }),
+            ];
+          }
+          if (functionName === "get_escrow") {
+            return {
+              policy: "SOURCE_LINKED",
+              status: "OPEN",
+              match_reason: "LOOKBACK_404_OK",
+              expected_repo: controlledConfig.cases.success.expectedRepo.toLowerCase(),
+              expected_tag: controlledConfig.cases.success.expectedTag,
+              template: controlledConfig.cases.success.template,
+              package_name: controlledConfig.cases.success.package,
+              version: controlledConfig.cases.success.version,
+              funder: validManifest.deployerAddress,
+              recipient: controlledConfig.recipientAddress,
+              amount: PRINCIPAL_PER_ESCROW_WEI.toString(),
+              nonce: controlledConfig.cases.success.nonce,
+              window_start_utc: fundArgs[6],
+              window_end_utc: fundArgs[7],
+              payout: "0",
+              refund: "0",
+            };
+          }
+          if (functionName === "get_economics") {
+            return writeCount === 0
+              ? { escrowed_open: "0", paid_to_recipients: "0", refunded_to_funders: "0", outstanding_credits: "0", treasury: "0" }
+              : { escrowed_open: "10000000000000000", paid_to_recipients: "0", refunded_to_funders: "0", outstanding_credits: "0", treasury: "0" };
+          }
+          return null;
+        },
+      };
+
+      const res = await runFund({
+        client: mockWriteClient,
+        manifest: validManifest,
+        config: controlledConfig,
+        caseName: "success",
+        evidencePath: testEvidencePath,
+        deployerAccount: { address: validManifest.deployerAddress },
+        queryRegistryFn: async () => ({ exists: false }),
+        queryGithubFn: async () => ({ exists: false }),
+      });
+
+      assert.equal(writeCount, 1, "Exactly 1 writeContract call — zero duplicate resubmissions");
+      assert.equal(res.success, true);
+      assert.equal(res.reconciled, true);
+
+      const saved = readJsonSafe(testEvidencePath);
+      assert.equal(saved.cases.success.state, "VERIFIED");
+      assert.equal(saved.cases.success.funding.txHash, testTxHash);
+    } finally {
+      delete process.env.SHIPLOCK_LIVE_WRITE;
+    }
+  });
+
+  // 58. Timeout followed by native pending persists the hash and submits zero additional writes
+  it("58. Timeout followed by native pending persists the hash and submits zero additional writes", async () => {
+    process.env.SHIPLOCK_LIVE_WRITE = "YES";
+    try {
+      let writeCount = 0;
+      const testTxHash = "0xfund_timeout_58";
+
+      const mockWriteClient = {
+        getBalance: async () => 2000000000000000000n,
+        estimateTransactionFees: async () => ({
+          distribution: { leaderTimeunitsAllocation: 200n, validatorTimeunitsAllocation: 400n },
+          feeValue: 5000000000000n,
+        }),
+        writeContract: async () => {
+          writeCount++;
+          return testTxHash;
+        },
+        waitForTransactionReceipt: async () => {
+          throw new Error("Transaction receipt timed out");
+        },
+        getTransactionReceipt: async () => null,
+        getTransaction: async () => ({
+          status: 5,
+          statusName: "COMMITTING",
+        }),
+        readContract: async () => null,
+      };
+
+      const res = await runFund({
+        client: mockWriteClient,
+        manifest: validManifest,
+        config: controlledConfig,
+        caseName: "success",
+        evidencePath: testEvidencePath,
+        deployerAccount: { address: validManifest.deployerAddress },
+        queryRegistryFn: async () => ({ exists: false }),
+        queryGithubFn: async () => ({ exists: false }),
+      });
+
+      assert.equal(writeCount, 1, "Exactly 1 writeContract call — zero duplicate resubmissions");
+      assert.equal(res.success, false);
+      assert.equal(res.state, "PENDING");
+      assert.equal(res.proofStatus, "PENDING_FINALIZATION");
+
+      const saved = readJsonSafe(testEvidencePath);
+      assert.equal(saved.cases.success.funding.txHash, testTxHash);
+      assert.equal(saved.cases.success.state, "PENDING");
+      assert.equal(saved.cases.success.funding.proofStatus, "PENDING_FINALIZATION");
+    } finally {
+      delete process.env.SHIPLOCK_LIVE_WRITE;
+    }
+  });
+
+  // 59. Contradictory standard/native outcomes fail closed with zero writes
+  it("59. Contradictory standard/native outcomes fail closed with zero writes", async () => {
+    let writeCount = 0;
+
+    // Case A: EVM reverted vs native success
+    const outcomeA = normalizeTransactionOutcome(
+      { status: "reverted", transactionHash: "0xhash_59a" },
+      { status: 7, last_round: { result: 1 } }
+    );
+    assert.equal(outcomeA.finalized, false);
+    assert.equal(outcomeA.success, false);
+    assert.throws(
+      () => verifyAuthoritativeOutcome(outcomeA),
+      /Transaction outcome contradiction.*reverted while native status indicates success/
+    );
+
+    // Case B: EVM success vs native execution failed
+    const outcomeB = normalizeTransactionOutcome(
+      { status: "success", transactionHash: "0xhash_59b" },
+      { status: 7, txExecutionResult: 2, txExecutionResultName: "EXECUTION_FAILED" }
+    );
+    assert.equal(outcomeB.finalized, false);
+    assert.equal(outcomeB.success, false);
+    assert.throws(
+      () => verifyAuthoritativeOutcome(outcomeB),
+      /Transaction outcome contradiction.*success while native status indicates execution failed/
+    );
+
+    // Reconcile with contradictory client
+    const mockClient = {
+      getTransactionReceipt: async () => ({ status: "reverted", transactionHash: "0xhash_59a" }),
+      getTransaction: async () => ({ status: 7, last_round: { result: 1 } }),
+      writeContract: async () => {
+        writeCount++;
+        throw new Error("Write forbidden");
+      },
+    };
+
+    const evidenceState = {
+      contractAddress: REQUIRED_CONTRACT_ADDRESS,
+      cases: {
+        success: {
+          funding: { txHash: "0xhash_59a", status: "SUBMITTED" },
+        },
+      },
+    };
+    writeFileSync(testEvidencePath, JSON.stringify(evidenceState, null, 2), "utf-8");
+
+    const res = await reconcileExistingFundingHash({
+      client: mockClient,
+      manifest: validManifest,
+      config: controlledConfig,
+      caseName: "success",
+      evidence: evidenceState,
+      evidencePath: testEvidencePath,
+      existingCase: evidenceState.cases.success,
+      expectedEscrowId: "0xescrow_59",
+    });
+
+    assert.equal(writeCount, 0, "Zero writes on contradictory outcomes");
+    assert.equal(res.success, false);
   });
 });

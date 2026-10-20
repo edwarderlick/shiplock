@@ -487,21 +487,819 @@ export function checkBalanceReserve(
 }
 
 /**
- * Validates transaction receipt status and execution result strictly fail-closed.
+ * Centralized transaction-outcome normalization helper.
+ * Strictly enforces GenLayer native consensus finality and execution outcomes.
+ *
+ * Rules:
+ * - Native statusName FINALIZED or native numeric status 7 establishes GenLayer finality.
+ * - Native execution FINISHED_WITH_RETURN, numeric result 1, or documented equivalent establishes successful execution.
+ * - Standard receipt status "success" may confirm EVM-level success but must never by itself be mislabeled as native GenLayer finality.
+ * - Pending, missing, failed, malformed, or contradictory results must fail closed.
  */
-export function verifyReceiptFinalizedSuccess(receipt) {
-  if (!receipt) {
-    throw new Error("Transaction receipt is missing or null");
+export function normalizeTransactionOutcome(arg1, arg2 = null) {
+  if (arg1 && typeof arg1 === "object" && typeof arg1.finalized === "boolean" && typeof arg1.success === "boolean" && "statusName" in arg1) {
+    return arg1;
   }
-  const status = receipt.statusName ?? receipt.status_name ?? receipt.status;
-  if (status !== "FINALIZED" && status !== 7 && status !== "7") {
-    throw new Error(`Transaction was not finalized: status=${status}`);
+
+  let receipt = null;
+  let nativeTx = null;
+
+  if (arg1 && typeof arg1 === "object" && ("receipt" in arg1 || "transaction" in arg1 || "nativeTx" in arg1)) {
+    receipt = arg1.receipt ?? null;
+    nativeTx = arg1.transaction ?? arg1.nativeTx ?? null;
+  } else if (arg2 !== null) {
+    receipt = arg1;
+    nativeTx = arg2;
+  } else {
+    const obj = arg1;
+    if (!obj || typeof obj !== "object") {
+      return {
+        finalized: false,
+        success: false,
+        status: null,
+        statusName: null,
+        executionResult: null,
+        executionResultName: null,
+        isPending: false,
+        isExecutionFailed: false,
+        isMalformed: true,
+        error: "Missing or invalid transaction/receipt object",
+        rawReceipt: null,
+        rawTransaction: null,
+      };
+    }
+    const hasNativeFields =
+      obj.statusName !== undefined ||
+      obj.txExecutionResult !== undefined ||
+      obj.txExecutionResultName !== undefined ||
+      obj.result_name !== undefined ||
+      obj.execution_result !== undefined ||
+      obj.lifecycle !== undefined ||
+      obj.last_round !== undefined ||
+      (typeof obj.status === "number" && obj.status >= 0 && obj.status <= 8);
+
+    if (hasNativeFields) {
+      nativeTx = obj;
+    } else {
+      receipt = obj;
+    }
   }
-  const exec = receipt.txExecutionResultName ?? receipt.tx_execution_result_name ?? receipt.txExecutionResult;
-  if (exec !== "FINISHED_WITH_RETURN" && exec !== 1 && exec !== "1" && exec !== "SUCCESS") {
-    throw new Error(`Transaction execution failed closed: result=${exec}`);
+
+  // Standard EVM receipt status analysis
+  let stdStatus = null;
+  if (receipt) {
+    const rawStd = receipt.status;
+    if (rawStd === "success" || rawStd === 1 || rawStd === "0x1") {
+      stdStatus = "success";
+    } else if (rawStd === "reverted" || rawStd === 0 || rawStd === "0x0") {
+      stdStatus = "reverted";
+    }
   }
-  return { finalized: true, success: true, status, exec };
+
+  // Native status extraction
+  const rawStatusName =
+    nativeTx?.statusName ??
+    nativeTx?.status_name ??
+    receipt?.statusName ??
+    receipt?.status_name ??
+    (typeof nativeTx?.status === "string" && !/^[0-8]$/.test(nativeTx.status) && nativeTx.status !== "success" && nativeTx.status !== "reverted" ? nativeTx.status : null) ??
+    (typeof receipt?.status === "string" && !/^[0-8]$/.test(receipt.status) && receipt.status !== "success" && receipt.status !== "reverted" ? receipt.status : null) ??
+    null;
+
+  let numericStatus = null;
+  const candStatus =
+    nativeTx?.status ??
+    (typeof receipt?.status === "number" && receipt.status !== 1 && receipt.status !== 0 ? receipt.status : null);
+  if (typeof candStatus === "number") {
+    numericStatus = candStatus;
+  } else if (typeof candStatus === "string" && /^[0-8]$/.test(candStatus)) {
+    numericStatus = Number(candStatus);
+  }
+
+  const lifecycleState = nativeTx?.lifecycle?.state ?? receipt?.lifecycle?.state ?? null;
+
+  // GenLayer native finality determination
+  const isFinalized =
+    rawStatusName === "FINALIZED" ||
+    numericStatus === 7 ||
+    lifecycleState === "finalized";
+
+  // Pending determination
+  const isPending =
+    !isFinalized &&
+    (rawStatusName === "PENDING" ||
+     rawStatusName === "PROPOSING" ||
+     rawStatusName === "COMMITTING" ||
+     rawStatusName === "REVEALING" ||
+     rawStatusName === "WAITING" ||
+     receipt?.status === "PENDING" ||
+     (numericStatus !== null && numericStatus >= 0 && numericStatus < 7) ||
+     lifecycleState === "pending" ||
+     lifecycleState === "committing");
+
+  // Native execution result extraction
+  const rawExecName =
+    nativeTx?.txExecutionResultName ??
+    nativeTx?.tx_execution_result_name ??
+    receipt?.txExecutionResultName ??
+    receipt?.tx_execution_result_name ??
+    (typeof nativeTx?.txExecutionResult === "string" && !/^[0-2]$/.test(nativeTx.txExecutionResult) ? nativeTx.txExecutionResult : null) ??
+    (typeof receipt?.txExecutionResult === "string" && !/^[0-2]$/.test(receipt.txExecutionResult) ? receipt.txExecutionResult : null) ??
+    null;
+
+  const rawExecValue =
+    nativeTx?.txExecutionResult ??
+    nativeTx?.tx_execution_result ??
+    receipt?.txExecutionResult ??
+    receipt?.tx_execution_result ??
+    nativeTx?.last_round?.result ??
+    receipt?.last_round?.result ??
+    null;
+
+  let numericExec = null;
+  if (typeof rawExecValue === "number") {
+    numericExec = rawExecValue;
+  } else if (typeof rawExecValue === "string" && /^[0-2]$/.test(rawExecValue)) {
+    numericExec = Number(rawExecValue);
+  }
+
+  const executionResultStr = nativeTx?.execution_result ?? receipt?.execution_result ?? null;
+  const lifecycleOutcome = nativeTx?.lifecycle?.outcome ?? receipt?.lifecycle?.outcome ?? null;
+
+  // Success indicators
+  const isNativeSuccessCandidate =
+    rawExecName === "FINISHED_WITH_RETURN" ||
+    rawExecName === "SUCCESS" ||
+    numericExec === 1 ||
+    executionResultStr === "SUCCESS" ||
+    lifecycleOutcome === "accepted";
+
+  // Failure indicators
+  const isNativeFailureCandidate =
+    rawExecName === "EXECUTION_FAILED" ||
+    rawExecName === "EXECUTION_ERROR" ||
+    rawExecName === "FAILED" ||
+    rawExecName === "ERROR" ||
+    rawExecName === "REVERTED" ||
+    numericExec === 2 ||
+    executionResultStr === "ERROR" ||
+    executionResultStr === "FAILED" ||
+    lifecycleOutcome === "rejected" ||
+    lifecycleOutcome === "failed";
+
+  // Contradictions check
+  let isContradictory = false;
+  let contradictionReason = null;
+  if (stdStatus === "reverted" && isNativeSuccessCandidate) {
+    isContradictory = true;
+    contradictionReason = "Contradiction: standard EVM receipt indicates reverted while native status indicates success";
+  } else if (stdStatus === "success" && isNativeFailureCandidate) {
+    isContradictory = true;
+    contradictionReason = "Contradiction: standard EVM receipt indicates success while native status indicates execution failed";
+  } else if (isNativeSuccessCandidate && isNativeFailureCandidate) {
+    isContradictory = true;
+    contradictionReason = "Contradiction: native outcome contains conflicting success and failure indicators";
+  }
+
+  const execSuccess = isNativeSuccessCandidate && !isNativeFailureCandidate && !isContradictory && stdStatus !== "reverted";
+  const execFailed = isNativeFailureCandidate || stdStatus === "reverted";
+
+  let error = null;
+  if (isContradictory) {
+    error = contradictionReason;
+  } else if (!isFinalized && !isPending) {
+    if (stdStatus === "success") {
+      error = "Standard receipt status 'success' does not establish native GenLayer finality without native transaction status";
+    } else {
+      error = "Transaction status is neither finalized nor pending";
+    }
+  } else if (isFinalized && !execSuccess && !execFailed) {
+    error = "Finalized transaction missing authoritative execution result";
+  }
+
+  const canonicalStatus = isFinalized ? "FINALIZED" : (isPending ? "PENDING" : (rawStatusName || numericStatus || stdStatus || "UNKNOWN"));
+  const canonicalExec = execSuccess ? "FINISHED_WITH_RETURN" : (execFailed ? (rawExecName || "EXECUTION_FAILED") : "UNKNOWN");
+
+  return {
+    finalized: isFinalized && !isContradictory,
+    success: isFinalized && execSuccess,
+    status: isFinalized ? "FINALIZED" : (numericStatus ?? rawStatusName ?? stdStatus),
+    statusName: canonicalStatus,
+    executionResult: execSuccess ? 1 : (execFailed ? 2 : (numericExec ?? rawExecName)),
+    executionResultName: canonicalExec,
+    isPending,
+    isExecutionFailed: isFinalized && execFailed,
+    stdReceiptStatus: stdStatus,
+    error,
+    rawReceipt: receipt,
+    rawTransaction: nativeTx,
+  };
+}
+
+/**
+ * Authoritatively verifies a normalized transaction outcome.
+ * Strictly requires:
+ * - finalized === true
+ * - success === true
+ * - no contradiction
+ * - authoritative native finality exists
+ * - authoritative native execution success exists
+ */
+export function verifyAuthoritativeOutcome(outcome) {
+  if (!outcome || typeof outcome !== "object") {
+    throw new Error("Authoritative transaction outcome missing or invalid.");
+  }
+
+  const norm = (typeof outcome.finalized === "boolean" && typeof outcome.success === "boolean" && "statusName" in outcome)
+    ? outcome
+    : normalizeTransactionOutcome(outcome);
+
+  if (norm.error && norm.error.toLowerCase().includes("contradiction")) {
+    throw new Error(`Transaction outcome contradiction: ${norm.error}`);
+  }
+
+  if (!norm.finalized) {
+    const rawStatus = norm.rawReceipt?.statusName ?? norm.rawReceipt?.status ?? norm.statusName ?? norm.status ?? "UNKNOWN";
+    throw new Error(`Transaction was not finalized: status=${rawStatus}${norm.error ? ` (${norm.error})` : ""}`);
+  }
+
+  if (!norm.success) {
+    const rawExec = norm.rawReceipt?.txExecutionResultName ?? norm.rawReceipt?.txExecutionResult ?? norm.executionResultName ?? norm.executionResult ?? "UNKNOWN";
+    throw new Error(`Transaction execution failed closed: result=${rawExec}${norm.error ? ` (${norm.error})` : ""}`);
+  }
+
+  // Ensure authoritative native finality indicator exists (not solely standard EVM "success")
+  const hasNativeFinality =
+    norm.statusName === "FINALIZED" ||
+    norm.status === "FINALIZED" ||
+    norm.status === 7 ||
+    norm.rawTransaction?.statusName === "FINALIZED" ||
+    norm.rawTransaction?.status === 7 ||
+    norm.rawReceipt?.statusName === "FINALIZED" ||
+    norm.rawReceipt?.status === 7;
+
+  if (!hasNativeFinality) {
+    throw new Error("Authoritative native finality missing: standard receipt alone does not establish GenLayer consensus finality.");
+  }
+
+  // Ensure authoritative native execution success indicator exists
+  const hasNativeExecSuccess =
+    norm.executionResultName === "FINISHED_WITH_RETURN" ||
+    norm.executionResult === 1 ||
+    norm.rawTransaction?.txExecutionResultName === "FINISHED_WITH_RETURN" ||
+    norm.rawTransaction?.txExecutionResult === 1 ||
+    norm.rawReceipt?.txExecutionResultName === "FINISHED_WITH_RETURN" ||
+    norm.rawReceipt?.txExecutionResult === 1;
+
+  if (!hasNativeExecSuccess) {
+    throw new Error("Authoritative native execution success missing: transaction execution result is not FINISHED_WITH_RETURN / 1.");
+  }
+
+  return {
+    finalized: true,
+    success: true,
+    status: norm.statusName || norm.status,
+    exec: norm.executionResultName || norm.executionResult,
+    normalized: norm,
+  };
+}
+
+/**
+ * Validates transaction receipt status and execution result strictly fail-closed.
+ * Fully compatible with native numeric and named values.
+ */
+export function verifyReceiptFinalizedSuccess(receipt, nativeTx = null) {
+  const normalized = normalizeTransactionOutcome(receipt, nativeTx);
+  return verifyAuthoritativeOutcome(normalized);
+}
+
+/**
+ * Queries authoritative transaction outcome across native GenLayer and EVM RPC layers.
+ * Combines wait receipt with native getTransaction if waitReceipt is provided.
+ */
+export async function getTransactionOutcome(client, hash, waitReceipt = null) {
+  if (!client || !hash) {
+    return normalizeTransactionOutcome(waitReceipt, null);
+  }
+
+  let nativeTx = null;
+  let receipt = waitReceipt;
+
+  if (typeof client.getTransaction === "function") {
+    try {
+      nativeTx = await client.getTransaction({ hash });
+    } catch {
+      nativeTx = null;
+    }
+  }
+
+  if (!receipt && typeof client.getTransactionReceipt === "function") {
+    try {
+      receipt = await client.getTransactionReceipt({ hash });
+    } catch {
+      receipt = null;
+    }
+  }
+
+  return normalizeTransactionOutcome(receipt, nativeTx);
+}
+
+/**
+ * Safely loads config without throwing if local config is absent.
+ */
+export function loadConfigSafe({ manifest } = {}) {
+  try {
+    return loadConfig({ manifest }).config;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Queries external registry and GitHub endpoints to verify lookback 404 absence for all cases.
+ */
+export async function checkExternalCoordinatesAbsent({
+  config = null,
+  successCase = null,
+  mismatchCase = null,
+  queryRegistryFn = queryRegistryMetadata,
+  queryGithubFn = queryGithubRelease,
+} = {}) {
+  const cases = config?.cases || loadConfigSafe()?.cases || {};
+  const sCase = successCase || cases.success || {
+    template: "NPM_VERSION",
+    package: "shiplock-v2-evidence-f2110c3e",
+    version: "1.0.0",
+    expectedRepo: "edwarderlick/shiplock",
+    expectedTag: "shiplock-evidence-v2-success-f2110c3e",
+  };
+  const mCase = mismatchCase || cases.mismatch || {
+    template: "NPM_VERSION",
+    package: "shiplock-v2-no-release-f2110c3e",
+    version: "1.0.0",
+    expectedRepo: "edwarderlick/shiplock",
+    expectedTag: "shiplock-evidence-v2-missing-f2110c3e",
+  };
+
+  // 1. Success npm
+  const sPkg = sCase.package || sCase.packageName;
+  const regSuccess = await queryRegistryFn(sCase.template, sPkg, sCase.version);
+  const successNpm404 = Boolean(regSuccess && (regSuccess.statusCode === 404 || regSuccess.kind === "404") && !regSuccess.exists);
+
+  // 2. Mismatch npm
+  const mPkg = mCase.package || mCase.packageName;
+  const regMismatch = await queryRegistryFn(mCase.template, mPkg, mCase.version);
+  const mismatchNpm404 = Boolean(regMismatch && (regMismatch.statusCode === 404 || regMismatch.kind === "404") && !regMismatch.exists);
+
+  // 3. Success GitHub tag
+  const [sOwner, sRepo] = (sCase.expectedRepo || "").split("/");
+  const ghSuccess = await queryGithubFn(sOwner, sRepo, sCase.expectedTag);
+  const successGh404 = Boolean(ghSuccess && !ghSuccess.exists && (ghSuccess.status_code === 404 || ghSuccess.kind === "404" || String(ghSuccess.message).includes("not found")));
+
+  // 4. Mismatch GitHub tag
+  const [mOwner, mRepo] = (mCase.expectedRepo || "").split("/");
+  const ghMismatch = await queryGithubFn(mOwner, mRepo, mCase.expectedTag);
+  const mismatchGh404 = Boolean(ghMismatch && !ghMismatch.exists && (ghMismatch.status_code === 404 || ghMismatch.kind === "404" || String(ghMismatch.message).includes("not found")));
+
+  const passed = successNpm404 && mismatchNpm404 && successGh404 && mismatchGh404;
+
+  return {
+    successNpm404,
+    mismatchNpm404,
+    successGh404,
+    mismatchGh404,
+    passed,
+  };
+}
+
+/**
+ * Recovers SUCCESS funding evidence strictly under exclusive-state invariants when
+ * the immediate post-funding snapshot was missed.
+ */
+export async function attemptExclusiveStateRecovery({
+  client,
+  manifest,
+  config = null,
+  caseName = "success",
+  evidence,
+  evidencePath = EVIDENCE_STATE_PATH,
+  txOutcome,
+  checkAbsenceFn = checkExternalCoordinatesAbsent,
+}) {
+  const c = evidence.cases?.[caseName];
+  if (!c) {
+    return { success: false, reason: "case_not_found" };
+  }
+
+  const writeInputs = c.writeInputs || c.funding?.writeInputs;
+  const expectedEscrowId = c.escrowId;
+  const preEcon = c.preEconomicsSnapshot;
+
+  if (!writeInputs || !expectedEscrowId || !preEcon) {
+    if (c.funding) {
+      c.funding.proofStatus = "PROOF_INCOMPLETE";
+    }
+    c.state = "PROOF_INCOMPLETE";
+    atomicWriteJson(evidencePath, evidence);
+    return { success: false, reason: "missing_prerequisites", proofStatus: "PROOF_INCOMPLETE" };
+  }
+
+  const assertions = {};
+  let allPassed = true;
+
+  // 1. Native transaction is FINALIZED with successful execution
+  const txSuccess = Boolean(txOutcome && txOutcome.finalized && txOutcome.success);
+  assertions.nativeTransactionFinalizedSuccess = {
+    expected: true,
+    observed: {
+      finalized: Boolean(txOutcome?.finalized),
+      success: Boolean(txOutcome?.success),
+      status: txOutcome?.statusName ?? txOutcome?.status ?? null,
+      exec: txOutcome?.executionResultName ?? txOutcome?.executionResult ?? null,
+    },
+    passed: txSuccess,
+  };
+  if (!txSuccess) allPassed = false;
+
+  // 2. get_escrow_ids returns exactly one escrow
+  let ids = [];
+  try {
+    ids = await client.readContract({
+      address: manifest.contractAddress,
+      functionName: "get_escrow_ids",
+      args: [],
+    });
+  } catch {
+    ids = [];
+  }
+  const singleEscrowCount = Array.isArray(ids) && ids.length === 1;
+  assertions.singleEscrowCount = {
+    expected: 1,
+    observed: Array.isArray(ids) ? ids.length : 0,
+    passed: singleEscrowCount,
+  };
+  if (!singleEscrowCount) allPassed = false;
+
+  // 3. That single ID equals the expected SUCCESS escrow ID
+  const singleId = Array.isArray(ids) && ids.length > 0 ? String(ids[0]) : "";
+  const singleIdMatches = Boolean(
+    singleId &&
+    expectedEscrowId &&
+    singleId.toLowerCase() === expectedEscrowId.toLowerCase()
+  );
+  assertions.singleEscrowIdMatch = {
+    expected: expectedEscrowId ? expectedEscrowId.toLowerCase() : null,
+    observed: singleId ? singleId.toLowerCase() : null,
+    passed: singleIdMatches,
+  };
+  if (!singleIdMatches) allPassed = false;
+
+  // Read current live escrow if single ID matches
+  let currentEscrow = null;
+  if (singleIdMatches) {
+    try {
+      currentEscrow = await client.readContract({
+        address: manifest.contractAddress,
+        functionName: "get_escrow",
+        args: [expectedEscrowId],
+      });
+    } catch {
+      currentEscrow = null;
+    }
+  }
+
+  // 4. Complete immutable identity matches persisted writeInputs
+  let identityMatch = false;
+  if (currentEscrow) {
+    try {
+      verifyEscrowImmutableIdentity({
+        escrowData: currentEscrow,
+        expectedInputs: writeInputs,
+      });
+      identityMatch = true;
+    } catch {
+      identityMatch = false;
+    }
+  }
+  assertions.immutableIdentityMatch = {
+    expected: true,
+    observed: identityMatch,
+    passed: identityMatch,
+  };
+  if (!identityMatch) allPassed = false;
+
+  // 5. Escrow status is OPEN
+  const statusOpen = currentEscrow?.status === "OPEN";
+  assertions.escrowStatusOpen = {
+    expected: "OPEN",
+    observed: currentEscrow?.status ?? null,
+    passed: statusOpen,
+  };
+  if (!statusOpen) allPassed = false;
+
+  // 6. Amount is exactly 10000000000000000 wei
+  const EXPECTED_AMOUNT_WEI = 10000000000000000n;
+  const escrowAmt = currentEscrow ? BigInt(currentEscrow.amount ?? 0) : 0n;
+  const amountMatch = escrowAmt === EXPECTED_AMOUNT_WEI;
+  assertions.escrowAmountMatch = {
+    expected: EXPECTED_AMOUNT_WEI.toString(),
+    observed: escrowAmt.toString(),
+    passed: amountMatch,
+  };
+  if (!amountMatch) allPassed = false;
+
+  // 7. Current economics are exactly open=10000000000000000, paid=0, refunded=0, credits=0, treasury=0
+  // Note: Only query get_economics if single escrow count & ID match passed, preventing spurious reconstruction calls
+  let currentEcon = null;
+  if (singleEscrowCount && singleIdMatches) {
+    try {
+      currentEcon = await client.readContract({
+        address: manifest.contractAddress,
+        functionName: "get_economics",
+        args: [],
+      });
+    } catch {
+      currentEcon = null;
+    }
+  }
+  const currentEconSer = currentEcon ? serializeEconomics(currentEcon) : null;
+  const currentEconMatch = Boolean(
+    currentEconSer &&
+    BigInt(currentEconSer.escrowed_open) === EXPECTED_AMOUNT_WEI &&
+    BigInt(currentEconSer.paid_to_recipients) === 0n &&
+    BigInt(currentEconSer.refunded_to_funders) === 0n &&
+    BigInt(currentEconSer.outstanding_credits) === 0n &&
+    BigInt(currentEconSer.treasury) === 0n
+  );
+  assertions.currentEconomicsMatch = {
+    expected: {
+      escrowed_open: EXPECTED_AMOUNT_WEI.toString(),
+      paid_to_recipients: "0",
+      refunded_to_funders: "0",
+      outstanding_credits: "0",
+      treasury: "0",
+    },
+    observed: currentEconSer,
+    passed: currentEconMatch,
+  };
+  if (!currentEconMatch) allPassed = false;
+
+  // 8. Persisted pre-funding economics are all zero
+  const preEconZero = Boolean(
+    preEcon &&
+    BigInt(preEcon.escrowed_open ?? 0) === 0n &&
+    BigInt(preEcon.paid_to_recipients ?? 0) === 0n &&
+    BigInt(preEcon.refunded_to_funders ?? 0) === 0n &&
+    BigInt(preEcon.outstanding_credits ?? 0) === 0n &&
+    BigInt(preEcon.treasury ?? 0) === 0n
+  );
+  assertions.preEconomicsZero = {
+    expected: {
+      escrowed_open: "0",
+      paid_to_recipients: "0",
+      refunded_to_funders: "0",
+      outstanding_credits: "0",
+      treasury: "0",
+    },
+    observed: preEcon,
+    passed: preEconZero,
+  };
+  if (!preEconZero) allPassed = false;
+
+  // 9. MISMATCH remains null/unfunded
+  const mismatchCase = evidence.cases?.mismatch;
+  const mismatchUnfunded = !mismatchCase || (!mismatchCase.funding?.txHash && mismatchCase.state !== "VERIFIED");
+  assertions.mismatchUnfunded = {
+    expected: true,
+    observed: {
+      exists: Boolean(mismatchCase),
+      state: mismatchCase?.state ?? null,
+      hasTxHash: Boolean(mismatchCase?.funding?.txHash),
+    },
+    passed: mismatchUnfunded,
+  };
+  if (!mismatchUnfunded) allPassed = false;
+
+  // 10. Both npm versions and both GitHub tags remain conclusively absent
+  let absenceResult = { passed: false };
+  try {
+    absenceResult = await checkAbsenceFn({ config, evidence });
+  } catch (err) {
+    absenceResult = { passed: false, error: err.message };
+  }
+  assertions.externalCoordinatesAbsent = {
+    expected: true,
+    observed: absenceResult,
+    passed: Boolean(absenceResult?.passed),
+  };
+  if (!absenceResult?.passed) allPassed = false;
+
+  // Fail closed if any assertion failed
+  if (!allPassed) {
+    console.log(`[!] Exclusive-state recovery assertions failed:`);
+    for (const [k, v] of Object.entries(assertions)) {
+      if (!v.passed) {
+        console.log(`    - ${k}: FAIL (observed: ${JSON.stringify(v.observed)})`);
+      }
+    }
+    c.state = "PROOF_INCOMPLETE";
+    c.funding.state = "PROOF_INCOMPLETE";
+    c.funding.proofStatus = "PROOF_INCOMPLETE";
+    c.funding.verified = false;
+    c.exclusiveStateAssertions = assertions;
+    atomicWriteJson(evidencePath, evidence);
+    return {
+      success: false,
+      proofStatus: "PROOF_INCOMPLETE",
+      assertions,
+      reason: "exclusivity_assertions_failed",
+    };
+  }
+
+  // All assertions passed! Persist exclusive-state recovery evidence
+  const recoveryObservedAtUtc = new Date().toISOString();
+  c.onChainAudit = serializeEscrowAudit(currentEscrow);
+  c.postEconomicsSnapshot = currentEconSer;
+  c.state = "VERIFIED";
+  c.funding.state = "VERIFIED";
+  c.funding.status = "FINALIZED";
+  c.funding.proofStatus = "VERIFIED";
+  c.funding.verified = true;
+  c.funding.verifiedAtUtc = recoveryObservedAtUtc;
+  c.funding.nativeOutcome = {
+    status: txOutcome.statusName || txOutcome.status,
+    exec: txOutcome.executionResultName || txOutcome.executionResult,
+    finalized: txOutcome.finalized,
+    success: txOutcome.success,
+  };
+  c.recoveryObservedAtUtc = recoveryObservedAtUtc;
+  c.captureMode = "EXCLUSIVE_STATE_RECOVERY";
+  c.exclusiveStateAssertions = assertions;
+
+  // Idempotent history: exactly one event
+  const txHash = c.funding?.txHash;
+  if (!evidence.history.some((h) => h.action === "fund_verified_recovery" && h.txHash === txHash)) {
+    evidence.history.push({
+      action: "fund_verified_recovery",
+      caseName,
+      txHash,
+      escrowId: expectedEscrowId,
+      timestampUtc: recoveryObservedAtUtc,
+    });
+  }
+
+  atomicWriteJson(evidencePath, evidence);
+  console.log(`[✓] Exclusive-state recovery verified successfully for case '${caseName}' (Escrow: ${expectedEscrowId})`);
+  return {
+    success: true,
+    proofStatus: "VERIFIED",
+    escrowId: expectedEscrowId,
+    txHash,
+    assertions,
+    recovered: true,
+  };
+}
+
+/**
+ * Reconciles an existing funding hash without resubmission.
+ */
+export async function reconcileExistingFundingHash({
+  client,
+  manifest,
+  config,
+  caseName,
+  evidence,
+  evidencePath = EVIDENCE_STATE_PATH,
+  existingCase,
+  expectedEscrowId,
+  canonicalRepo,
+  canonicalTag,
+  nonce,
+  windowStartUtc,
+  windowEndUtc,
+  checkAbsenceFn = checkExternalCoordinatesAbsent,
+}) {
+  console.log(`[🔍 RECOVERY] Found previously recorded funding hash for '${caseName}': ${existingCase.funding.txHash}. Reconciling...`);
+  const txOutcome = await getTransactionOutcome(client, existingCase.funding.txHash);
+
+  if (!txOutcome.finalized) {
+    if (txOutcome.isExecutionFailed) {
+      existingCase.state = "FINALIZED_FAILED";
+      existingCase.funding.state = "FINALIZED_FAILED";
+      existingCase.funding.status = txOutcome.statusName || txOutcome.status;
+      existingCase.funding.executionResult = txOutcome.executionResultName || txOutcome.executionResult;
+      existingCase.funding.proofStatus = "EXECUTION_FAILED";
+      atomicWriteJson(evidencePath, evidence);
+      return {
+        success: false,
+        txHash: existingCase.funding.txHash,
+        state: "FINALIZED_FAILED",
+        proofStatus: "EXECUTION_FAILED",
+        reconciled: true,
+      };
+    }
+    // Pending or temporarily unavailable
+    existingCase.state = "PENDING";
+    existingCase.funding.state = "PENDING";
+    existingCase.funding.status = txOutcome.statusName || txOutcome.status || "PENDING";
+    existingCase.funding.executionResult = txOutcome.executionResultName || "UNKNOWN";
+    existingCase.funding.proofStatus = "PENDING_FINALIZATION";
+    atomicWriteJson(evidencePath, evidence);
+    return {
+      success: false,
+      txHash: existingCase.funding.txHash,
+      state: "PENDING",
+      proofStatus: "PENDING_FINALIZATION",
+      reconciled: true,
+    };
+  }
+
+  if (!txOutcome.success) {
+    existingCase.state = "FINALIZED_FAILED";
+    existingCase.funding.state = "FINALIZED_FAILED";
+    existingCase.funding.status = txOutcome.statusName || txOutcome.status;
+    existingCase.funding.executionResult = txOutcome.executionResultName || txOutcome.executionResult;
+    existingCase.funding.proofStatus = "EXECUTION_FAILED";
+    atomicWriteJson(evidencePath, evidence);
+    return {
+      success: false,
+      txHash: existingCase.funding.txHash,
+      state: "FINALIZED_FAILED",
+      proofStatus: "EXECUTION_FAILED",
+      reconciled: true,
+    };
+  }
+
+  verifyAuthoritativeOutcome(txOutcome);
+
+  const onChainEscrow = await client.readContract({
+    address: manifest.contractAddress,
+    functionName: "get_escrow",
+    args: [expectedEscrowId],
+  });
+
+  const expectedInputs = existingCase.writeInputs || {
+    template: config?.cases?.[caseName]?.template,
+    package: config?.cases?.[caseName]?.package,
+    version: config?.cases?.[caseName]?.version,
+    expectedRepo: canonicalRepo,
+    expectedTag: canonicalTag,
+    funder: manifest.deployerAddress,
+    recipient: config?.recipientAddress,
+    nonce,
+    windowStartUtc,
+    windowEndUtc,
+  };
+
+  if (onChainEscrow) {
+    verifyEscrowImmutableIdentity({
+      escrowData: onChainEscrow,
+      expectedInputs,
+    });
+    if (!["OPEN", "RELEASED", "REFUND_NOHIT"].includes(onChainEscrow.status)) {
+      throw new Error(`Recovery audit failure: unexpected on-chain escrow status '${onChainEscrow.status}'.`);
+    }
+  }
+
+  if (existingCase.onChainAudit && existingCase.postEconomicsSnapshot && existingCase.preEconomicsSnapshot) {
+    verifyFundedEscrowAudit({
+      escrowData: existingCase.onChainAudit,
+      expectedInputs,
+      econBefore: existingCase.preEconomicsSnapshot,
+      econAfter: existingCase.postEconomicsSnapshot,
+    });
+    existingCase.state = "VERIFIED";
+    existingCase.funding.state = "VERIFIED";
+    existingCase.funding.status = "FINALIZED";
+    existingCase.funding.proofStatus = "VERIFIED";
+    existingCase.funding.verified = true;
+    atomicWriteJson(evidencePath, evidence);
+    console.log(`[✓] Existing transaction successfully verified without duplicate submission.`);
+    return { success: true, txHash: existingCase.funding.txHash, escrowId: expectedEscrowId, reconciled: true };
+  } else {
+    // Historical snapshots missing: attempt exclusive-state recovery
+    const recoveryRes = await attemptExclusiveStateRecovery({
+      client,
+      manifest,
+      config,
+      caseName,
+      evidence,
+      evidencePath,
+      txOutcome,
+      checkAbsenceFn,
+    });
+    if (recoveryRes.success) {
+      return { success: true, txHash: existingCase.funding.txHash, escrowId: expectedEscrowId, reconciled: true, recovered: true };
+    }
+    return {
+      success: false,
+      proofStatus: "PROOF_INCOMPLETE",
+      txHash: existingCase.funding.txHash,
+      escrowId: expectedEscrowId,
+      reconciled: true,
+      reason: recoveryRes.reason || "missing_historical_snapshots",
+    };
+  }
 }
 
 /**
@@ -635,6 +1433,36 @@ export function serializeReceipt(receipt) {
     hash: receipt.hash ?? receipt.transactionHash,
     blockNumber: receipt.blockNumber ? receipt.blockNumber.toString() : null,
   };
+}
+
+/**
+ * Serializes complete 16-coordinate on-chain escrow audit record.
+ */
+export function serializeEscrowAudit(escrow) {
+  if (!escrow) return null;
+  const res = {
+    id: escrow.id ? String(escrow.id) : undefined,
+    policy: escrow.policy !== undefined ? String(escrow.policy) : "SOURCE_LINKED",
+    status: String(escrow.status || ""),
+    match_reason: String(escrow.match_reason || ""),
+    template: escrow.template !== undefined ? String(escrow.template) : undefined,
+    package_name: escrow.package_name !== undefined ? String(escrow.package_name) : (escrow.package !== undefined ? String(escrow.package) : undefined),
+    version: escrow.version !== undefined ? String(escrow.version) : undefined,
+    expected_repo: escrow.expected_repo !== undefined ? String(escrow.expected_repo) : undefined,
+    expected_tag: escrow.expected_tag !== undefined ? String(escrow.expected_tag) : undefined,
+    funder: escrow.funder ? String(escrow.funder) : undefined,
+    recipient: escrow.recipient ? String(escrow.recipient) : undefined,
+    amount: escrow.amount !== undefined ? escrow.amount.toString() : "0",
+    nonce: escrow.nonce !== undefined ? escrow.nonce.toString() : undefined,
+    window_start_utc: escrow.window_start_utc !== undefined ? String(escrow.window_start_utc) : undefined,
+    window_end_utc: escrow.window_end_utc !== undefined ? String(escrow.window_end_utc) : undefined,
+    payout: escrow.payout !== undefined ? escrow.payout.toString() : "0",
+    refund: escrow.refund !== undefined ? escrow.refund.toString() : "0",
+  };
+  for (const k of Object.keys(res)) {
+    if (res[k] === undefined) delete res[k];
+  }
+  return res;
 }
 
 /**
@@ -1029,70 +1857,21 @@ export async function runFund({
 
   // Crash Recovery & Duplicate Submission Prevention
   if (existingCase?.funding?.txHash) {
-    console.log(`[🔍 RECOVERY] Found previously recorded funding hash for '${caseName}': ${existingCase.funding.txHash}. Reconciling...`);
-    const receipt = await client.getTransactionReceipt({ hash: existingCase.funding.txHash });
-    verifyReceiptFinalizedSuccess(receipt);
-
-    const onChainEscrow = await client.readContract({
-      address: manifest.contractAddress,
-      functionName: "get_escrow",
-      args: [expectedEscrowId],
-    });
-
-    const expectedInputs = existingCase.writeInputs || {
-      template: caseConfig.template,
-      package: caseConfig.package,
-      version: caseConfig.version,
-      expectedRepo: canonicalRepo,
-      expectedTag: canonicalTag,
-      funder: manifest.deployerAddress,
-      recipient: config.recipientAddress,
+    return await reconcileExistingFundingHash({
+      client,
+      manifest,
+      config,
+      caseName,
+      evidence,
+      evidencePath,
+      existingCase,
+      expectedEscrowId,
+      canonicalRepo,
+      canonicalTag,
       nonce,
       windowStartUtc,
       windowEndUtc,
-    };
-
-    if (onChainEscrow) {
-      verifyEscrowImmutableIdentity({
-        escrowData: onChainEscrow,
-        expectedInputs,
-      });
-      if (!["OPEN", "RELEASED", "REFUND_NOHIT"].includes(onChainEscrow.status)) {
-        throw new Error(`Recovery audit failure: unexpected on-chain escrow status '${onChainEscrow.status}'.`);
-      }
-    }
-
-    if (existingCase.onChainAudit && existingCase.postEconomicsSnapshot && existingCase.preEconomicsSnapshot) {
-      verifyFundedEscrowAudit({
-        escrowData: existingCase.onChainAudit,
-        expectedInputs,
-        econBefore: existingCase.preEconomicsSnapshot,
-        econAfter: existingCase.postEconomicsSnapshot,
-      });
-      existingCase.state = "VERIFIED";
-      existingCase.funding.status = "FINALIZED";
-      existingCase.funding.proofStatus = "VERIFIED";
-      existingCase.funding.verified = true;
-      atomicWriteJson(evidencePath, evidence);
-      console.log(`[✓] Existing transaction successfully verified without duplicate submission.`);
-      return { success: true, txHash: existingCase.funding.txHash, escrowId: expectedEscrowId, reconciled: true };
-    } else {
-      // Historical snapshots missing: fail closed without reconstructing from current aggregate economics
-      existingCase.state = "PROOF_INCOMPLETE";
-      existingCase.funding.status = "FINALIZED";
-      existingCase.funding.proofStatus = "PROOF_INCOMPLETE";
-      existingCase.funding.verified = false;
-      atomicWriteJson(evidencePath, evidence);
-      console.log(`[!] Existing funding transaction lacks required historical snapshots. Marking PROOF_INCOMPLETE without duplicate write.`);
-      return {
-        success: false,
-        proofStatus: "PROOF_INCOMPLETE",
-        txHash: existingCase.funding.txHash,
-        escrowId: expectedEscrowId,
-        reconciled: true,
-        reason: "missing_historical_snapshots",
-      };
-    }
+    });
   }
 
   // If PREPARED without txHash, check whether expected escrow was already created on-chain
@@ -1258,31 +2037,73 @@ export async function runFund({
   console.log(`[+] Funding transaction submitted: ${txHash}`);
 
   console.log(`[*] Awaiting finalization on Studio Next...`);
-  const receipt = await writeClient.waitForTransactionReceipt({
-    hash: txHash,
-    waitUntil: "finalized",
-  });
+  let receipt = null;
+  try {
+    receipt = await writeClient.waitForTransactionReceipt({
+      hash: txHash,
+      waitUntil: "finalized",
+      retries: 40,
+      interval: 3000,
+    });
+  } catch (waitErr) {
+    console.log(`[!] waitForTransactionReceipt timed out or threw: ${waitErr.message}. Never resubmitting.`);
+    console.log(`[*] Automatically entering existing-hash recovery path for '${txHash}'...`);
+    return await reconcileExistingFundingHash({
+      client: writeClient,
+      manifest,
+      config,
+      caseName,
+      evidence,
+      evidencePath,
+      existingCase: evidence.cases[caseName],
+      expectedEscrowId,
+      canonicalRepo,
+      canonicalTag,
+      nonce,
+      windowStartUtc,
+      windowEndUtc,
+    });
+  }
 
-  const receiptStatus = receipt.statusName ?? receipt.status;
-  const execResult = receipt.txExecutionResultName ?? receipt.txExecutionResult;
+  // Combine wait receipt with native getTransaction response
+  const outcome = await getTransactionOutcome(writeClient, txHash, receipt);
 
-  if (receiptStatus !== "FINALIZED") {
+  if (!outcome.finalized) {
+    if (outcome.isExecutionFailed) {
+      evidence.cases[caseName].state = "FINALIZED_FAILED";
+      evidence.cases[caseName].funding.state = "FINALIZED_FAILED";
+      evidence.cases[caseName].funding.status = outcome.statusName || outcome.status;
+      evidence.cases[caseName].funding.executionResult = outcome.executionResultName || outcome.executionResult;
+      evidence.cases[caseName].funding.proofStatus = "EXECUTION_FAILED";
+      evidence.cases[caseName].funding.receipt = serializeReceipt(receipt);
+      atomicWriteJson(evidencePath, evidence);
+      const rawExec = receipt?.txExecutionResultName ?? receipt?.txExecutionResult ?? outcome.executionResultName;
+      throw new Error(`Transaction execution failed closed: result=${rawExec} (${outcome.error || "execution failed"})`);
+    }
     evidence.cases[caseName].state = "PENDING";
-    evidence.cases[caseName].funding.status = receiptStatus;
-    evidence.cases[caseName].funding.executionResult = execResult ?? "UNKNOWN";
+    evidence.cases[caseName].funding.state = "PENDING";
+    evidence.cases[caseName].funding.status = outcome.statusName || outcome.status || "PENDING";
+    evidence.cases[caseName].funding.executionResult = outcome.executionResultName || "UNKNOWN";
+    evidence.cases[caseName].funding.proofStatus = "PENDING_FINALIZATION";
     evidence.cases[caseName].funding.receipt = serializeReceipt(receipt);
     atomicWriteJson(evidencePath, evidence);
-    throw new Error(`Transaction was not finalized: status=${receiptStatus}`);
+    const rawStatus = receipt?.statusName ?? receipt?.status ?? outcome.statusName;
+    throw new Error(`Transaction was not finalized: status=${rawStatus} (${outcome.error || "missing native finality"})`);
   }
 
-  if (execResult !== "FINISHED_WITH_RETURN" && execResult !== "SUCCESS") {
+  if (!outcome.success) {
     evidence.cases[caseName].state = "FINALIZED_FAILED";
-    evidence.cases[caseName].funding.status = receiptStatus;
-    evidence.cases[caseName].funding.executionResult = execResult;
+    evidence.cases[caseName].funding.state = "FINALIZED_FAILED";
+    evidence.cases[caseName].funding.status = outcome.statusName || outcome.status;
+    evidence.cases[caseName].funding.executionResult = outcome.executionResultName || outcome.executionResult;
+    evidence.cases[caseName].funding.proofStatus = "EXECUTION_FAILED";
     evidence.cases[caseName].funding.receipt = serializeReceipt(receipt);
     atomicWriteJson(evidencePath, evidence);
-    throw new Error(`Transaction execution failed closed: result=${execResult}`);
+    const rawExec = receipt?.txExecutionResultName ?? receipt?.txExecutionResult ?? outcome.executionResultName;
+    throw new Error(`Transaction execution failed closed: result=${rawExec} (${outcome.error || "execution failed"})`);
   }
+
+  verifyAuthoritativeOutcome(outcome);
 
   // Concurrency-Safe Escrow Discovery: Query expected escrow ID directly
   const escrowData = await writeClient.readContract({
@@ -1342,7 +2163,7 @@ export async function runFund({
   evidence.cases[caseName].funding.status = "FINALIZED";
   evidence.cases[caseName].funding.executionResult = receipt.txExecutionResultName ?? "FINISHED_WITH_RETURN";
   evidence.cases[caseName].funding.verifiedAtUtc = new Date().toISOString();
-  evidence.cases[caseName].onChainAudit = serializeEscrow(escrowData);
+  evidence.cases[caseName].onChainAudit = serializeEscrowAudit(escrowData);
   evidence.cases[caseName].postEconomicsSnapshot = serializeEconomics(econAfter);
 
   evidence.history.push({
@@ -1370,8 +2191,10 @@ export async function runFund({
 export async function runReconcile({
   client: injectedClient,
   manifest: injectedManifest,
+  config: injectedConfig,
   evidencePath = EVIDENCE_STATE_PATH,
   verifyTransferFn = verifyEmittedTransferOrChildTx,
+  checkAbsenceFn = checkExternalCoordinatesAbsent,
 } = {}) {
   console.log("=== Reconciling v2 Steward Evidence ===");
   const manifest = injectedManifest || loadContractBinding();
@@ -1410,90 +2233,99 @@ export async function runReconcile({
     if (c.funding?.txHash) {
       inspected++;
       try {
-        const receipt = await client.getTransactionReceipt({ hash: c.funding.txHash });
-        if (!receipt) {
-          c.funding.proofStatus = "PROOF_INCOMPLETE";
-          proofIncomplete++;
-        } else {
-          const status = receipt.statusName ?? receipt.status;
-          const exec = receipt.txExecutionResultName ?? receipt.txExecutionResult;
-
-          if (status !== "FINALIZED") {
-            c.funding.state = "PENDING";
-            c.funding.proofStatus = "PENDING_FINALIZATION";
-            pending++;
-          } else if (exec !== "FINISHED_WITH_RETURN" && exec !== "SUCCESS") {
+        const txOutcome = await getTransactionOutcome(client, c.funding.txHash);
+        if (!txOutcome.finalized) {
+          if (txOutcome.isExecutionFailed) {
             c.funding.state = "FINALIZED_FAILED";
             c.funding.proofStatus = "EXECUTION_FAILED";
             failed++;
           } else {
-            // Receipt finalized success. Run full verifyFundedEscrowAudit on historical snapshots
-            const writeInputs = c.writeInputs || c.funding.writeInputs;
-            const preEcon = c.preEconomicsSnapshot;
-            const postEcon = c.postEconomicsSnapshot;
-            const onChainAudit = c.onChainAudit;
+            c.funding.state = "PENDING";
+            c.funding.proofStatus = "PENDING_FINALIZATION";
+            pending++;
+          }
+        } else if (!txOutcome.success) {
+          c.funding.state = "FINALIZED_FAILED";
+          c.funding.proofStatus = "EXECUTION_FAILED";
+          failed++;
+        } else {
+          verifyAuthoritativeOutcome(txOutcome);
+          // Receipt finalized success
+          const writeInputs = c.writeInputs || c.funding.writeInputs;
+          const preEcon = c.preEconomicsSnapshot;
+          const postEcon = c.postEconomicsSnapshot;
+          const onChainAudit = c.onChainAudit;
 
-            // Missing snapshot check: report PROOF_INCOMPLETE honestly. Never reconstruct from current aggregate economics.
-            if (!c.escrowId || !writeInputs || !preEcon || !postEcon || !onChainAudit) {
+          if (!c.escrowId || !writeInputs || !preEcon || !postEcon || !onChainAudit) {
+            // Missing snapshot: attempt exclusive-state recovery
+            const recoveryRes = await attemptExclusiveStateRecovery({
+              client,
+              manifest,
+              config: injectedConfig || loadConfigSafe({ manifest }),
+              caseName: caseKey,
+              evidence,
+              evidencePath,
+              txOutcome,
+              checkAbsenceFn,
+            });
+            if (recoveryRes.success) {
+              verified++;
+            } else {
+              if (c.funding) {
+                c.funding.proofStatus = "PROOF_INCOMPLETE";
+              }
+              c.state = "PROOF_INCOMPLETE";
+              atomicWriteJson(evidencePath, evidence);
+              proofIncomplete++;
+            }
+          } else {
+            let auditPassed = false;
+            try {
+              verifyFundedEscrowAudit({
+                escrowData: onChainAudit,
+                expectedInputs: writeInputs,
+                econBefore: preEcon,
+                econAfter: postEcon,
+              });
+              auditPassed = true;
+            } catch (auditErr) {
+              console.log(`  Historical funding audit mismatch: ${auditErr.message}`);
               c.funding.proofStatus = "PROOF_INCOMPLETE";
               proofIncomplete++;
-            } else {
-              let auditPassed = false;
+            }
+
+            if (auditPassed) {
               try {
-                // 1. Validate persisted writeInputs against persisted immediate post-funding onChainAudit snapshot
-                // and validate historical funding economics delta: preEconomicsSnapshot -> postEconomicsSnapshot
-                verifyFundedEscrowAudit({
-                  escrowData: onChainAudit,
-                  expectedInputs: writeInputs,
-                  econBefore: preEcon,
-                  econAfter: postEcon,
+                const currentEscrow = await client.readContract({
+                  address: manifest.contractAddress,
+                  functionName: "get_escrow",
+                  args: [c.escrowId],
                 });
-                auditPassed = true;
-              } catch (auditErr) {
-                console.log(`  Historical funding audit mismatch: ${auditErr.message}`);
+
+                if (!currentEscrow) {
+                  throw new Error(`Current escrow '${c.escrowId}' not found on-chain.`);
+                }
+
+                verifyEscrowImmutableIdentity({
+                  escrowData: currentEscrow,
+                  expectedInputs: writeInputs,
+                });
+
+                const validLifecycleStates = ["OPEN", "RELEASED", "REFUND_NOHIT"];
+                if (!validLifecycleStates.includes(currentEscrow.status)) {
+                  throw new Error(`Audit failure: current escrow status '${currentEscrow.status}' is not permitted.`);
+                }
+
+                c.funding.state = "VERIFIED";
+                c.funding.proofStatus = "VERIFIED";
+                c.funding.verified = true;
+                c.currentLifecycleStatus = currentEscrow.status;
+                c.currentEscrowSnapshot = serializeEscrow(currentEscrow);
+                verified++;
+              } catch (identErr) {
+                console.log(`  Current escrow immutable identity or status check failed: ${identErr.message}`);
                 c.funding.proofStatus = "PROOF_INCOMPLETE";
                 proofIncomplete++;
-              }
-
-              if (auditPassed) {
-                try {
-                  // 2. Query current live escrow
-                  const currentEscrow = await client.readContract({
-                    address: manifest.contractAddress,
-                    functionName: "get_escrow",
-                    args: [c.escrowId],
-                  });
-
-                  if (!currentEscrow) {
-                    throw new Error(`Current escrow '${c.escrowId}' not found on-chain.`);
-                  }
-
-                  // 3. Verify its immutable identity fields still match:
-                  // policy, template, package, version, expected_repo, expected_tag,
-                  // funder, recipient, amount, nonce, window_start_utc, window_end_utc
-                  verifyEscrowImmutableIdentity({
-                    escrowData: currentEscrow,
-                    expectedInputs: writeInputs,
-                  });
-
-                  // 4. Permit valid later lifecycle states, including OPEN, RELEASED, and REFUND_NOHIT
-                  const validLifecycleStates = ["OPEN", "RELEASED", "REFUND_NOHIT"];
-                  if (!validLifecycleStates.includes(currentEscrow.status)) {
-                    throw new Error(`Audit failure: current escrow status '${currentEscrow.status}' is not permitted.`);
-                  }
-
-                  // Keep funding proof VERIFIED
-                  c.funding.state = "VERIFIED";
-                  c.funding.proofStatus = "VERIFIED";
-                  c.currentLifecycleStatus = currentEscrow.status;
-                  c.currentEscrowSnapshot = serializeEscrow(currentEscrow);
-                  // Do NOT overwrite postEconomicsSnapshot with current economics during later reconciliation!
-                  verified++;
-                } catch (identErr) {
-                  console.log(`  Current escrow immutable identity or status check failed: ${identErr.message}`);
-                  c.funding.proofStatus = "PROOF_INCOMPLETE";
-                  proofIncomplete++;
-                }
               }
             }
           }
@@ -1510,23 +2342,24 @@ export async function runReconcile({
     if (c.release?.txHash) {
       inspected++;
       try {
-        const receipt = await client.getTransactionReceipt({ hash: c.release.txHash });
-        if (!receipt) {
-          c.release.proofStatus = "PROOF_INCOMPLETE";
-          proofIncomplete++;
-        } else {
-          const status = receipt.statusName ?? receipt.status;
-          const exec = receipt.txExecutionResultName ?? receipt.txExecutionResult;
-
-          if (status !== "FINALIZED") {
-            c.release.state = "PENDING";
-            c.release.proofStatus = "PENDING_FINALIZATION";
-            pending++;
-          } else if (exec !== "FINISHED_WITH_RETURN" && exec !== "SUCCESS") {
+        const txOutcome = await getTransactionOutcome(client, c.release.txHash);
+        const receipt = txOutcome.rawReceipt || txOutcome.rawTransaction || txOutcome;
+        if (!txOutcome.finalized) {
+          if (txOutcome.isExecutionFailed) {
             c.release.state = "FINALIZED_FAILED";
             c.release.proofStatus = "EXECUTION_FAILED";
             failed++;
           } else {
+            c.release.state = "PENDING";
+            c.release.proofStatus = "PENDING_FINALIZATION";
+            pending++;
+          }
+        } else if (!txOutcome.success) {
+          c.release.state = "FINALIZED_FAILED";
+          c.release.proofStatus = "EXECUTION_FAILED";
+          failed++;
+        } else {
+          verifyAuthoritativeOutcome(txOutcome);
             const preEcon = c.release.preEconomicsSnapshot;
             const postEcon = c.release.postEconomicsSnapshot;
             if (!c.escrowId || !preEcon || !postEcon) {
@@ -1616,7 +2449,6 @@ export async function runReconcile({
             }
           }
           console.log(`  Release State   : ${c.release.state} (Proof: ${c.release.proofStatus})`);
-        }
       } catch (err) {
         c.release.proofStatus = "PROOF_INCOMPLETE";
         proofIncomplete++;
@@ -1680,32 +2512,32 @@ export async function runRelease({
   // Reconcile existing release hash first; never submit duplicate writes
   if (targetCase.release?.txHash) {
     console.log(`[🔍 RECOVERY] Found previously recorded release hash for '${caseName}': ${targetCase.release.txHash}. Reconciling...`);
-    const receipt = await client.getTransactionReceipt({ hash: targetCase.release.txHash });
-    if (!receipt) {
-      targetCase.release.proofStatus = "PROOF_INCOMPLETE";
-      atomicWriteJson(evidencePath, evidence);
-      return { success: false, txHash: targetCase.release.txHash, proofStatus: "PROOF_INCOMPLETE", reconciled: true };
-    }
-
-    const receiptStatus = receipt.statusName ?? receipt.status;
-    const execResult = receipt.txExecutionResultName ?? receipt.txExecutionResult;
-
-    if (receiptStatus !== "FINALIZED") {
+    const txOutcome = await getTransactionOutcome(client, targetCase.release.txHash);
+    const receipt = txOutcome.rawReceipt || txOutcome.rawTransaction || txOutcome;
+    if (!txOutcome.finalized) {
+      if (txOutcome.isExecutionFailed) {
+        targetCase.release.state = "FINALIZED_FAILED";
+        targetCase.release.proofStatus = "EXECUTION_FAILED";
+        targetCase.release.executionResult = txOutcome.executionResultName || txOutcome.executionResult;
+        atomicWriteJson(evidencePath, evidence);
+        return { success: false, txHash: targetCase.release.txHash, state: "FINALIZED_FAILED", proofStatus: "EXECUTION_FAILED", reconciled: true };
+      }
       targetCase.release.state = "PENDING";
       targetCase.release.proofStatus = "PENDING_FINALIZATION";
-      targetCase.release.receipt = serializeReceipt(receipt);
       atomicWriteJson(evidencePath, evidence);
-      return { success: false, txHash: targetCase.release.txHash, state: "PENDING", reconciled: true };
+      return { success: false, txHash: targetCase.release.txHash, state: "PENDING", proofStatus: "PENDING_FINALIZATION", reconciled: true };
     }
 
-    if (execResult !== "FINISHED_WITH_RETURN" && execResult !== "SUCCESS") {
+    if (!txOutcome.success) {
       targetCase.release.state = "FINALIZED_FAILED";
       targetCase.release.proofStatus = "EXECUTION_FAILED";
-      targetCase.release.executionResult = execResult;
-      targetCase.release.receipt = serializeReceipt(receipt);
+      targetCase.release.executionResult = txOutcome.executionResultName || txOutcome.executionResult;
       atomicWriteJson(evidencePath, evidence);
-      return { success: false, txHash: targetCase.release.txHash, state: "FINALIZED_FAILED", reconciled: true };
+      return { success: false, txHash: targetCase.release.txHash, state: "FINALIZED_FAILED", proofStatus: "EXECUTION_FAILED", reconciled: true };
     }
+
+    // Receipt is finalized success
+    verifyAuthoritativeOutcome(txOutcome);
 
     // Receipt is finalized success. Check snapshots and post state
     const preEcon = targetCase.release.preEconomicsSnapshot;
@@ -2005,31 +2837,76 @@ export async function runRelease({
   console.log(`[+] Release transaction submitted: ${txHash}`);
 
   console.log(`[*] Awaiting finalization on Studio Next...`);
-  const receipt = await writeClient.waitForTransactionReceipt({
-    hash: txHash,
-    waitUntil: "finalized",
-  });
+  let receipt = null;
+  try {
+    receipt = await writeClient.waitForTransactionReceipt({
+      hash: txHash,
+      waitUntil: "finalized",
+    });
+  } catch (waitErr) {
+    console.log(`[!] waitForTransactionReceipt timed out or threw for release tx '${txHash}': ${waitErr.message}. Never resubmitting.`);
+    console.log(`[*] Querying native outcome for release tx '${txHash}'...`);
+    const txOutcome = await getTransactionOutcome(writeClient, txHash);
+    if (!txOutcome.finalized) {
+      if (txOutcome.isExecutionFailed) {
+        targetCase.release.state = "FINALIZED_FAILED";
+        targetCase.release.proofStatus = "EXECUTION_FAILED";
+        targetCase.release.executionResult = txOutcome.executionResultName || txOutcome.executionResult;
+        atomicWriteJson(evidencePath, evidence);
+        return { success: false, txHash, state: "FINALIZED_FAILED", proofStatus: "EXECUTION_FAILED" };
+      }
+      targetCase.release.state = "PENDING";
+      targetCase.release.proofStatus = "PENDING_FINALIZATION";
+      atomicWriteJson(evidencePath, evidence);
+      return { success: false, txHash, state: "PENDING", proofStatus: "PENDING_FINALIZATION" };
+    }
+    if (!txOutcome.success) {
+      targetCase.release.state = "FINALIZED_FAILED";
+      targetCase.release.proofStatus = "EXECUTION_FAILED";
+      targetCase.release.executionResult = txOutcome.executionResultName || txOutcome.executionResult;
+      atomicWriteJson(evidencePath, evidence);
+      return { success: false, txHash, state: "FINALIZED_FAILED", proofStatus: "EXECUTION_FAILED" };
+    }
+    verifyAuthoritativeOutcome(txOutcome);
+    receipt = txOutcome.rawReceipt || receipt;
+  }
 
-  const receiptStatus = receipt.statusName ?? receipt.status;
-  const execResult = receipt.txExecutionResultName ?? receipt.txExecutionResult;
+  // Combine wait receipt with native getTransaction response
+  const outcome = await getTransactionOutcome(writeClient, txHash, receipt);
 
-  if (receiptStatus !== "FINALIZED") {
+  if (!outcome.finalized) {
+    if (outcome.isExecutionFailed) {
+      targetCase.release.state = "FINALIZED_FAILED";
+      targetCase.release.status = outcome.statusName || outcome.status;
+      targetCase.release.executionResult = outcome.executionResultName || outcome.executionResult;
+      targetCase.release.proofStatus = "EXECUTION_FAILED";
+      targetCase.release.receipt = serializeReceipt(receipt);
+      atomicWriteJson(evidencePath, evidence);
+      const rawExec = receipt?.txExecutionResultName ?? receipt?.txExecutionResult ?? outcome.executionResultName;
+      throw new Error(`Release transaction execution failed closed: result=${rawExec} (${outcome.error || "execution failed"})`);
+    }
     targetCase.release.state = "PENDING";
-    targetCase.release.status = receiptStatus;
-    targetCase.release.executionResult = execResult ?? "UNKNOWN";
+    targetCase.release.status = outcome.statusName || outcome.status || "PENDING";
+    targetCase.release.executionResult = outcome.executionResultName || "UNKNOWN";
+    targetCase.release.proofStatus = "PENDING_FINALIZATION";
     targetCase.release.receipt = serializeReceipt(receipt);
     atomicWriteJson(evidencePath, evidence);
-    throw new Error(`Release transaction was not finalized: status=${receiptStatus}`);
+    const rawStatus = receipt?.statusName ?? receipt?.status ?? outcome.statusName;
+    throw new Error(`Release transaction was not finalized: status=${rawStatus} (${outcome.error || "missing native finality"})`);
   }
 
-  if (execResult !== "FINISHED_WITH_RETURN" && execResult !== "SUCCESS") {
+  if (!outcome.success) {
     targetCase.release.state = "FINALIZED_FAILED";
-    targetCase.release.status = receiptStatus;
-    targetCase.release.executionResult = execResult;
+    targetCase.release.status = outcome.statusName || outcome.status;
+    targetCase.release.executionResult = outcome.executionResultName || outcome.executionResult;
+    targetCase.release.proofStatus = "EXECUTION_FAILED";
     targetCase.release.receipt = serializeReceipt(receipt);
     atomicWriteJson(evidencePath, evidence);
-    throw new Error(`Release transaction execution failed closed: result=${execResult}`);
+    const rawExec = receipt?.txExecutionResultName ?? receipt?.txExecutionResult ?? outcome.executionResultName;
+    throw new Error(`Release transaction execution failed closed: result=${rawExec} (${outcome.error || "execution failed"})`);
   }
+
+  verifyAuthoritativeOutcome(outcome);
 
   // Read post-release escrow state and economics
   const postEscrow = await writeClient.readContract({
@@ -2103,7 +2980,7 @@ export async function runRelease({
     targetCase.release.state = "PROOF_INCOMPLETE";
   }
 
-  targetCase.release.executionResult = execResult;
+  targetCase.release.executionResult = outcome.executionResultName || outcome.executionResult;
   targetCase.release.resultingStatus = postEscrow.status;
   targetCase.release.resultingMatchReason = postEscrow.match_reason;
   targetCase.release.finalizedAtUtc = new Date().toISOString();

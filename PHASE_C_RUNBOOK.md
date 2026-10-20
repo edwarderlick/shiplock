@@ -6,7 +6,7 @@
 - **Chain ID**: `61997`
 - **Canonical RPC Endpoint**: `https://studio-dev.genlayer.com/api`
 - **Studio Next Explorer**: `https://explorer-studio-dev.genlayer.com`
-- **Deployment Transaction**: [`0x6874241737bf6b45f0e5f71211a5923bb02e6c8b715b15ed606a405d4a28182f`](https://explorer-studio-dev.genlayer.com/tx/0x6874241737bf6b45f0e5f71211a5923bb02e6c8b715b15ed606a405d4a28182f)
+- **Deployment Transaction**: [`0x6874241737bf6b45f0e5f71211a5923bb02e6c8b715b15ed606a405d4a28182f`](https://explorer-studio-dev.genlayer.com/transactions/0x6874241737bf6b45f0e5f71211a5923bb02e6c8b715b15ed606a405d4a28182f)
 - **Deployed Source SHA-256**: `860387dc9579aba8d445df9395c4ec80bc425b7b8a3d7b27eed8cc477b59276d` (51,327 bytes)
 - **Deployer / Funder Address**: `0x20E850BAaD26d763d4f691780D1BEBA01c8D6084`
 - **Dedicated Evidence File**: `scripts/v2_steward_evidence.json`
@@ -82,147 +82,139 @@ The v2 live evidence harness (`scripts/v2_live_evidence.mjs`) is engineered with
 
 ---
 
-## Operator Workflow: Phases C1, C2, and C3
+## Operator Workflow: Phases C1 Through C4
 
-### Phase C1: Verification & Preflight (Current State)
-Phase C1 establishes and verifies the harness without any live transactions or state mutations.
+### Phase C1: Verification & Preflight (Completed)
+Phase C1 established and verified the harness without any live transactions or state mutations.
 
-#### Step 1: Run Automated Verification Suite
-Run the dedicated v2 harness behavioral test suite (34 tests):
+#### Step 1: Automated Verification Suite (59 Tests)
+Run the dedicated v2 harness behavioral test suite:
 ```bash
 node --test tests/test_v2_live_evidence.mjs
 ```
 Expected output:
 ```text
-# tests 34
+# tests 59
 # suites 1
-# pass 34
+# pass 59
 # fail 0
 ```
 
-#### Step 2: Run Read-Only Preflight
+#### Step 2: Read-Only Preflight
 ```bash
 node scripts/v2_live_evidence.mjs preflight
 ```
-The preflight command:
-- Verifies contract code is present on-chain (51,327 characters).
-- Confirms chain ID (`61997`) and RPC connectivity.
-- Reads `get_escrow_ids` and `get_economics`.
-- Checks deployer wallet balance (asserts $\ge 0.06$ GEN).
-- Validates repository and release tag syntax.
-- Performs read-only lookups against registry and GitHub releases.
-- Evaluates coordinate suitability:
-  - If placeholder coordinates are present in config: reports `readyForLiveWrites: false` and explains that live writes are blocked until real, controlled coordinates are provided in `scripts/v2_evidence_config.local.json`.
-  - If controlled coordinates are configured and lookback passes: reports `readyForLiveWrites: true`.
-- Confirms zero transactions submitted.
+The preflight command verifies contract bytecode, connectivity, empty/initial economics, and performs read-only lookbacks confirming target coordinates return HTTP 404.
 
 ---
 
-### Phase C2: Live Escrow Funding (Future Operator Phase)
-*Note: Phase C1 strictly prohibits live transactions. The following steps are for Phase C2.*
+### Phase C2: Live Escrow Funding (Completed & Verified on Studio Next)
 
-#### Step 1: Configure Controlled Artifact Coordinates
-Create local runtime configuration in `scripts/v2_evidence_config.local.json` (git-ignored) with real, operator-controlled coordinates (never placeholders):
-```json
-{
-  "contractAddress": "0xF2110c3E6B170caF10FE953564285C6f01cB1F0c",
-  "chainId": 61997,
-  "rpcUrl": "https://studio-dev.genlayer.com/api",
-  "keychainService": "genlayer-cli",
-  "deployerAccount": "account:shiplock-deployer-live",
-  "submitterAccount": "account:coverlock-submitter",
-  "recipientAddress": "<your-controlled-nonzero-recipient-address>",
-  "cases": {
-    "success": {
-      "name": "Controlled Success Case",
-      "template": "NPM_VERSION",
-      "package": "<your-controlled-npm-package>",
-      "version": "1.0.0",
-      "expectedRepo": "<your-github-org>/<your-repo>",
-      "expectedTag": "v1.0.0",
-      "amountWei": "10000000000000000",
-      "windowLeadHours": 26,
-      "windowDurationHours": 48,
-      "nonce": "<cryptographic-random-nonce-1>"
-    },
-    "mismatch": {
-      "name": "Controlled Mismatch Case",
-      "template": "PYPI_VERSION",
-      "package": "<your-controlled-pypi-package>",
-      "version": "0.1.0",
-      "expectedRepo": "<your-github-org>/<your-repo>",
-      "expectedTag": "v0.1.0-wrong-tag",
-      "amountWei": "10000000000000000",
-      "windowLeadHours": 26,
-      "windowDurationHours": 48,
-      "nonce": "<cryptographic-random-nonce-2>"
-    }
-  }
-}
-```
+Both live escrows have been funded on GenLayer Studio Next (`61997`) under contract `0xF2110c3E6B170caF10FE953564285C6f01cB1F0c` with 0.01 GEN (10^16 wei) locked principal each:
 
-#### Step 2: Fund Success Case Escrow
-```powershell
-$env:SHIPLOCK_LIVE_WRITE="YES"
-node scripts/v2_live_evidence.mjs fund --case=success
-```
+1. **SUCCESS Escrow (In-Window Source-Linked Verified Release Target)**:
+   - **Escrow ID**: `0x5c751544da2e5d505dbdb118ca2fb94e53091bb28493c236889ae69fc78a909d`
+   - **Funding Transaction**: [`0x86538668726638307a4897eb2fcb89ccd4d2ce642fc42abf10abab6ea8cf9726`](https://explorer-studio-dev.genlayer.com/transactions/0x86538668726638307a4897eb2fcb89ccd4d2ce642fc42abf10abab6ea8cf9726)
+   - **Funding Status**: `FINALIZED` / `FINISHED_WITH_RETURN`
+   - **On-Chain State**: `OPEN` (`LOOKBACK_404_OK`, 0.01 GEN locked)
+   - **Template & Package**: `NPM_VERSION` / `shiplock-v2-evidence-f2110c3e` @ `1.0.0`
+   - **Expected Repo & Tag**: `edwarderlick/shiplock` / `shiplock-evidence-v2-success-f2110c3e`
+   - **Window**: `2026-10-21T06:58:31Z` to `2026-10-23T06:58:31Z`
+   - **Nonce**: `1001`
+   - **Provenance**: Captured via authoritative `EXCLUSIVE_STATE_RECOVERY` audit (`2026-10-20T07:27:35.665Z`) with all 10 exclusive state assertions verified against on-chain state.
 
-#### Step 3: Fund Mismatch Case Escrow
-```powershell
-$env:SHIPLOCK_LIVE_WRITE="YES"
-node scripts/v2_live_evidence.mjs fund --case=mismatch
-```
+2. **MISMATCH Escrow (Post-Window Conclusive Negative Refund Target)**:
+   - **Escrow ID**: `0xdb592d59e4dbc85926eac234ba3c92677ec2f42aeb4de1f1430cf9454d7a5a88`
+   - **Funding Transaction**: [`0xa0acb2c81ef7e8aaae6d0f826f0ca6101904a337a1ef797d22855ade0d68ecf0`](https://explorer-studio-dev.genlayer.com/transactions/0xa0acb2c81ef7e8aaae6d0f826f0ca6101904a337a1ef797d22855ade0d68ecf0)
+   - **Funding Status**: `FINALIZED` / `FINISHED_WITH_RETURN`
+   - **On-Chain State**: `OPEN` (`LOOKBACK_404_OK`, 0.01 GEN locked)
+   - **Template & Package**: `NPM_VERSION` / `shiplock-v2-no-release-f2110c3e` @ `1.0.0`
+   - **Expected Repo & Tag**: `edwarderlick/shiplock` / `shiplock-evidence-v2-missing-f2110c3e`
+   - **Window**: `2026-10-21T11:20:26Z` to `2026-10-23T11:20:26Z`
+   - **Nonce**: `1002`
+   - **Provenance**: Captured immediately post-funding (`2026-10-20T09:21:13.367Z`) with on-chain economics verified transitioning from 0.01 GEN to 0.02 GEN open.
 
-#### Step 4: Reconcile Pending Transactions
-If any transaction times out during finalization or process interruption occurs, run:
-```bash
-node scripts/v2_live_evidence.mjs reconcile
-```
+3. **Current Live Economics (`get_economics()`)**:
+   - `escrowed_open`: `20000000000000000` wei (`0.02 GEN`)
+   - `paid_to_recipients`: `0`
+   - `refunded_to_funders`: `0`
+   - `outstanding_credits`: `0`
+   - `treasury`: `0`
+
+4. **Common Publication Interval**:
+   - UTC: `2026-10-21T11:20:26Z` through `2026-10-23T06:58:31Z`
+   - IST: `2026-10-21 16:50:26` through `2026-10-23 12:28:31`
+   - Duration: 43 hours, 38 minutes, 5 seconds.
 
 ---
 
-### Phase C3: Release Settlement & Verification (Future Operator Phase)
+### Phase C4A: Land Verified Evidence & Freeze Publication Bundle (Current Phase)
 
-#### Step 1: Evidence Evolution Across Windows
-1. **Success Case (In-Window Release)**:
-   - Wait until `window_start_utc` is reached on Studio Next RPC.
-   - Publish the controlled package to npm with matching version and repository metadata.
-   - Execute release while `window_start_utc <= RPC time < expire_at_utc` (evidence must have been published within `[window_start_utc, window_end_utc]`). Success settlement is permitted after `window_end_utc` as long as publications were in-window and settlement occurs before `expire_at_utc`.
-2. **Mismatch Case (Post-Window Conclusive Settlement)**:
-   - During the active window (`RPC time < window_end_utc`), any mismatch release attempt remains `OPEN` and retryable (match reason `EARLY_REGISTRY_MISMATCH_RETRYABLE` or `EARLY_GITHUB_TAG_MISMATCH_RETRYABLE`).
-   - For conclusive refund settlement, wait until `window_end_utc <= RPC time < expire_at_utc`.
-   - Execute release post-window to trigger conclusive on-chain refund to funder.
+This phase freezes the bundle, audits the working tree, confirms external absence (HTTP 404), and commits the frozen release target commit:
+1. **Zero External Publications**:
+   - No npm publishing.
+   - No Git tag creation.
+   - No GitHub release creation.
+   - Zero blockchain writes.
+2. **Bundle Freeze & Dry-Run Verification**:
+   - Package `evidence/npm/success`: `shiplock-v2-evidence-f2110c3e@1.0.0` (4 files, dry-run pack/publish clean).
+   - Package `evidence/npm/mismatch`: `shiplock-v2-no-release-f2110c3e@1.0.0` (4 files, dry-run pack/publish clean).
+3. **Absence Assertions**:
+   - npm `shiplock-v2-evidence-f2110c3e@1.0.0` → HTTP 404
+   - npm `shiplock-v2-no-release-f2110c3e@1.0.0` → HTTP 404
+   - GitHub release `shiplock-evidence-v2-success-f2110c3e` → HTTP 404
+   - GitHub release `shiplock-evidence-v2-missing-f2110c3e` → HTTP 404
+4. **Git Commit & Push**:
+   - Commit message: `feat(evidence): verify live v2 funding and prepare publication window`
+   - Push to `origin/main`. Local HEAD equals `origin/main`. This pushed commit is the frozen release target for Phase C4B.
 
-#### Step 2: Execute Release Writes
+---
+
+### Phase C4B: Publication, Release Settlement & Verification (Upcoming Phase)
+
+*Execution strictly restricted to the authorized window: at or after `2026-10-21T11:20:26Z` (UTC) / `2026-10-21 16:50:26` (IST).*
+
+#### Step 1: Publication Sequence (Inside Common Window)
+1. Publish SUCCESS package to npm:
+   ```bash
+   cd evidence/npm/success
+   npm publish --access public
+   ```
+2. Publish MISMATCH package to npm:
+   ```bash
+   cd evidence/npm/mismatch
+   npm publish --access public
+   ```
+3. Create exactly ONE GitHub release and tag targeting the frozen commit SHA:
+   - Tag / Release: `shiplock-evidence-v2-success-f2110c3e`
+4. **CRITICAL INVARIANT**: Never create GitHub release tag `shiplock-evidence-v2-missing-f2110c3e`. It must remain absent indefinitely.
+
+#### Step 2: Execute In-Window Release Write (Success Case)
+Inside the common window:
 ```powershell
 $env:SHIPLOCK_LIVE_WRITE="YES"
 node scripts/v2_live_evidence.mjs release --case=success
 ```
-and
+Confirm:
+- Status transitions to `RELEASED` with `match_reason: "VERIFIED_RELEASE"`.
+- Payout: `10000000000000000` wei (`0.01 GEN`) to recipient.
+- Economics: `escrowed_open` decrements to 0.01 GEN; `paid_to_recipients` increments to 0.01 GEN.
+
+#### Step 3: Execute Post-Window Release Write (Mismatch Case)
+After the MISMATCH window ends (`now >= 2026-10-23T11:20:26Z`):
 ```powershell
 $env:SHIPLOCK_LIVE_WRITE="YES"
 node scripts/v2_live_evidence.mjs release --case=mismatch
 ```
+Confirm:
+- Status transitions to `REFUND_NOHIT` with `match_reason: "WINDOW_EXPIRED_GITHUB_NO_RELEASE"`.
+- Refund: `10000000000000000` wei (`0.01 GEN`) to funder.
+- Economics: `escrowed_open` decrements to 0; `refunded_to_funders` increments to 0.01 GEN.
 
-#### Step 3: Final Evidence Audit & Truthful Settlement States
-Run reconcile to verify final states:
+#### Step 4: Final Reconcile & State Verification
 ```bash
 node scripts/v2_live_evidence.mjs reconcile
 ```
-Inspect `scripts/v2_steward_evidence.json` to confirm:
-- **Success Case**:
-  - `status === "RELEASED"`
-  - `match_reason === "VERIFIED_RELEASE"`
-  - `payout === 10000000000000000` (0.01 GEN), `refund === 0`
-  - Economics: `escrowed_open` decreased by 0.01 GEN, `paid_to_recipients` increased by 0.01 GEN
-  - Matching GenVM emitted message verified to recipient
-- **Mismatch Case**:
-  - `status === "REFUND_NOHIT"`
-  - `match_reason` matches one of the contract's conclusive negative reasons:
-    `REGISTRY_REPO_MISMATCH`, `GITHUB_TAG_MISMATCH`, `GITHUB_REPO_MISMATCH`, `WINDOW_EXPIRED_GITHUB_NO_RELEASE`, `WINDOW_EXPIRED_NO_RELEASE`, or `YANKED`
-  - `refund === 10000000000000000` (0.01 GEN), `payout === 0`
-  - Economics: `escrowed_open` decreased by 0.01 GEN, `refunded_to_funders` increased by 0.01 GEN
-  - Matching GenVM emitted message verified to funder
 
 ---
 
@@ -230,7 +222,7 @@ Inspect `scripts/v2_steward_evidence.json` to confirm:
 
 All gates must pass cleanly:
 ```bash
-# 1. Dedicated v2 Live Evidence Harness behavioral tests (34 passed)
+# 1. Dedicated v2 Live Evidence Harness behavioral tests (59 passed)
 node --test tests/test_v2_live_evidence.mjs
 
 # 2. Historical Evidence Harness regression tests (60 passed)

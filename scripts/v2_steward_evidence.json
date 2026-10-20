@@ -5,8 +5,305 @@
   "policy": "SOURCE_LINKED",
   "initializedAtUtc": "2026-10-19T17:39:00.000Z",
   "cases": {
-    "success": null,
-    "mismatch": null
+    "success": {
+      "state": "VERIFIED",
+      "caseName": "success",
+      "escrowId": "0x5c751544da2e5d505dbdb118ca2fb94e53091bb28493c236889ae69fc78a909d",
+      "writeInputs": {
+        "template": "NPM_VERSION",
+        "package": "shiplock-v2-evidence-f2110c3e",
+        "packageName": "shiplock-v2-evidence-f2110c3e",
+        "version": "1.0.0",
+        "expectedRepo": "edwarderlick/shiplock",
+        "expectedTag": "shiplock-evidence-v2-success-f2110c3e",
+        "recipient": "0x9CE8B4b8A355421f01779Ebd0c49e22A8F1FF0DD",
+        "funder": "0x20E850BAaD26d763d4f691780D1BEBA01c8D6084",
+        "windowStartUtc": "2026-10-21T06:58:31Z",
+        "windowEndUtc": "2026-10-23T06:58:31Z",
+        "nonce": "1001",
+        "amountWei": "10000000000000000"
+      },
+      "beforeIds": [],
+      "preEconomicsSnapshot": {
+        "escrowed_open": "0",
+        "paid_to_recipients": "0",
+        "refunded_to_funders": "0",
+        "outstanding_credits": "0",
+        "treasury": "0"
+      },
+      "balanceWei": "2929241806749989297",
+      "estimatedFeeWei": "50000000000010352",
+      "safetyReserveWei": "50000000000000000",
+      "preparedAtUtc": "2026-10-20T04:58:35.346Z",
+      "funding": {
+        "txHash": "0x86538668726638307a4897eb2fcb89ccd4d2ce642fc42abf10abab6ea8cf9726",
+        "status": "FINALIZED",
+        "submittedAtUtc": "2026-10-20T04:58:37.572Z",
+        "writeInputs": {
+          "template": "NPM_VERSION",
+          "package": "shiplock-v2-evidence-f2110c3e",
+          "packageName": "shiplock-v2-evidence-f2110c3e",
+          "version": "1.0.0",
+          "expectedRepo": "edwarderlick/shiplock",
+          "expectedTag": "shiplock-evidence-v2-success-f2110c3e",
+          "recipient": "0x9CE8B4b8A355421f01779Ebd0c49e22A8F1FF0DD",
+          "funder": "0x20E850BAaD26d763d4f691780D1BEBA01c8D6084",
+          "windowStartUtc": "2026-10-21T06:58:31Z",
+          "windowEndUtc": "2026-10-23T06:58:31Z",
+          "nonce": "1001",
+          "amountWei": "10000000000000000"
+        },
+        "state": "VERIFIED",
+        "proofStatus": "VERIFIED",
+        "verified": true,
+        "verifiedAtUtc": "2026-10-20T07:27:35.665Z",
+        "nativeOutcome": {
+          "status": "FINALIZED",
+          "exec": "FINISHED_WITH_RETURN",
+          "finalized": true,
+          "success": true
+        }
+      },
+      "onChainAudit": {
+        "id": "0x5c751544da2e5d505dbdb118ca2fb94e53091bb28493c236889ae69fc78a909d",
+        "policy": "SOURCE_LINKED",
+        "status": "OPEN",
+        "match_reason": "LOOKBACK_404_OK",
+        "template": "NPM_VERSION",
+        "package_name": "shiplock-v2-evidence-f2110c3e",
+        "version": "1.0.0",
+        "expected_repo": "edwarderlick/shiplock",
+        "expected_tag": "shiplock-evidence-v2-success-f2110c3e",
+        "funder": "0x20E850BAaD26d763d4f691780D1BEBA01c8D6084",
+        "recipient": "0x9CE8B4b8A355421f01779Ebd0c49e22A8F1FF0DD",
+        "amount": "10000000000000000",
+        "nonce": "1001",
+        "window_start_utc": "2026-10-21T06:58:31Z",
+        "window_end_utc": "2026-10-23T06:58:31Z",
+        "payout": "0",
+        "refund": "0"
+      },
+      "postEconomicsSnapshot": {
+        "escrowed_open": "10000000000000000",
+        "paid_to_recipients": "0",
+        "refunded_to_funders": "0",
+        "outstanding_credits": "0",
+        "treasury": "0"
+      },
+      "recoveryObservedAtUtc": "2026-10-20T07:27:35.665Z",
+      "captureMode": "EXCLUSIVE_STATE_RECOVERY",
+      "exclusiveStateAssertions": {
+        "nativeTransactionFinalizedSuccess": {
+          "expected": true,
+          "observed": {
+            "finalized": true,
+            "success": true,
+            "status": "FINALIZED",
+            "exec": "FINISHED_WITH_RETURN"
+          },
+          "passed": true
+        },
+        "singleEscrowCount": {
+          "expected": 1,
+          "observed": 1,
+          "passed": true
+        },
+        "singleEscrowIdMatch": {
+          "expected": "0x5c751544da2e5d505dbdb118ca2fb94e53091bb28493c236889ae69fc78a909d",
+          "observed": "0x5c751544da2e5d505dbdb118ca2fb94e53091bb28493c236889ae69fc78a909d",
+          "passed": true
+        },
+        "immutableIdentityMatch": {
+          "expected": true,
+          "observed": true,
+          "passed": true
+        },
+        "escrowStatusOpen": {
+          "expected": "OPEN",
+          "observed": "OPEN",
+          "passed": true
+        },
+        "escrowAmountMatch": {
+          "expected": "10000000000000000",
+          "observed": "10000000000000000",
+          "passed": true
+        },
+        "currentEconomicsMatch": {
+          "expected": {
+            "escrowed_open": "10000000000000000",
+            "paid_to_recipients": "0",
+            "refunded_to_funders": "0",
+            "outstanding_credits": "0",
+            "treasury": "0"
+          },
+          "observed": {
+            "escrowed_open": "10000000000000000",
+            "paid_to_recipients": "0",
+            "refunded_to_funders": "0",
+            "outstanding_credits": "0",
+            "treasury": "0"
+          },
+          "passed": true
+        },
+        "preEconomicsZero": {
+          "expected": {
+            "escrowed_open": "0",
+            "paid_to_recipients": "0",
+            "refunded_to_funders": "0",
+            "outstanding_credits": "0",
+            "treasury": "0"
+          },
+          "observed": {
+            "escrowed_open": "0",
+            "paid_to_recipients": "0",
+            "refunded_to_funders": "0",
+            "outstanding_credits": "0",
+            "treasury": "0"
+          },
+          "passed": true
+        },
+        "mismatchUnfunded": {
+          "expected": true,
+          "observed": {
+            "exists": false,
+            "state": null,
+            "hasTxHash": false
+          },
+          "passed": true
+        },
+        "externalCoordinatesAbsent": {
+          "expected": true,
+          "observed": {
+            "successNpm404": true,
+            "mismatchNpm404": true,
+            "successGh404": true,
+            "mismatchGh404": true,
+            "passed": true
+          },
+          "passed": true
+        }
+      },
+      "currentLifecycleStatus": "OPEN",
+      "currentEscrowSnapshot": {
+        "id": "0x5c751544da2e5d505dbdb118ca2fb94e53091bb28493c236889ae69fc78a909d",
+        "status": "OPEN",
+        "amount": "10000000000000000",
+        "match_reason": "LOOKBACK_404_OK",
+        "payout": "0",
+        "refund": "0",
+        "funder": "0x20E850BAaD26d763d4f691780D1BEBA01c8D6084",
+        "recipient": "0x9CE8B4b8A355421f01779Ebd0c49e22A8F1FF0DD"
+      }
+    },
+    "mismatch": {
+      "state": "VERIFIED",
+      "caseName": "mismatch",
+      "escrowId": "0xdb592d59e4dbc85926eac234ba3c92677ec2f42aeb4de1f1430cf9454d7a5a88",
+      "writeInputs": {
+        "template": "NPM_VERSION",
+        "package": "shiplock-v2-no-release-f2110c3e",
+        "packageName": "shiplock-v2-no-release-f2110c3e",
+        "version": "1.0.0",
+        "expectedRepo": "edwarderlick/shiplock",
+        "expectedTag": "shiplock-evidence-v2-missing-f2110c3e",
+        "recipient": "0x9CE8B4b8A355421f01779Ebd0c49e22A8F1FF0DD",
+        "funder": "0x20E850BAaD26d763d4f691780D1BEBA01c8D6084",
+        "windowStartUtc": "2026-10-21T11:20:26Z",
+        "windowEndUtc": "2026-10-23T11:20:26Z",
+        "nonce": "1002",
+        "amountWei": "10000000000000000"
+      },
+      "beforeIds": [
+        "0x5c751544da2e5d505dbdb118ca2fb94e53091bb28493c236889ae69fc78a909d"
+      ],
+      "preEconomicsSnapshot": {
+        "escrowed_open": "10000000000000000",
+        "paid_to_recipients": "0",
+        "refunded_to_funders": "0",
+        "outstanding_credits": "0",
+        "treasury": "0"
+      },
+      "balanceWei": "2919162734499987650",
+      "estimatedFeeWei": "50000000000010352",
+      "safetyReserveWei": "50000000000000000",
+      "preparedAtUtc": "2026-10-20T09:20:29.477Z",
+      "funding": {
+        "txHash": "0xa0acb2c81ef7e8aaae6d0f826f0ca6101904a337a1ef797d22855ade0d68ecf0",
+        "status": "FINALIZED",
+        "submittedAtUtc": "2026-10-20T09:20:31.614Z",
+        "writeInputs": {
+          "template": "NPM_VERSION",
+          "package": "shiplock-v2-no-release-f2110c3e",
+          "packageName": "shiplock-v2-no-release-f2110c3e",
+          "version": "1.0.0",
+          "expectedRepo": "edwarderlick/shiplock",
+          "expectedTag": "shiplock-evidence-v2-missing-f2110c3e",
+          "recipient": "0x9CE8B4b8A355421f01779Ebd0c49e22A8F1FF0DD",
+          "funder": "0x20E850BAaD26d763d4f691780D1BEBA01c8D6084",
+          "windowStartUtc": "2026-10-21T11:20:26Z",
+          "windowEndUtc": "2026-10-23T11:20:26Z",
+          "nonce": "1002",
+          "amountWei": "10000000000000000"
+        },
+        "executionResult": "FINISHED_WITH_RETURN",
+        "verifiedAtUtc": "2026-10-20T09:21:13.367Z",
+        "state": "VERIFIED",
+        "proofStatus": "VERIFIED",
+        "verified": true
+      },
+      "onChainAudit": {
+        "id": "0xdb592d59e4dbc85926eac234ba3c92677ec2f42aeb4de1f1430cf9454d7a5a88",
+        "policy": "SOURCE_LINKED",
+        "status": "OPEN",
+        "match_reason": "LOOKBACK_404_OK",
+        "template": "NPM_VERSION",
+        "package_name": "shiplock-v2-no-release-f2110c3e",
+        "version": "1.0.0",
+        "expected_repo": "edwarderlick/shiplock",
+        "expected_tag": "shiplock-evidence-v2-missing-f2110c3e",
+        "funder": "0x20E850BAaD26d763d4f691780D1BEBA01c8D6084",
+        "recipient": "0x9CE8B4b8A355421f01779Ebd0c49e22A8F1FF0DD",
+        "amount": "10000000000000000",
+        "nonce": "1002",
+        "window_start_utc": "2026-10-21T11:20:26Z",
+        "window_end_utc": "2026-10-23T11:20:26Z",
+        "payout": "0",
+        "refund": "0"
+      },
+      "postEconomicsSnapshot": {
+        "escrowed_open": "20000000000000000",
+        "paid_to_recipients": "0",
+        "refunded_to_funders": "0",
+        "outstanding_credits": "0",
+        "treasury": "0"
+      },
+      "currentLifecycleStatus": "OPEN",
+      "currentEscrowSnapshot": {
+        "id": "0xdb592d59e4dbc85926eac234ba3c92677ec2f42aeb4de1f1430cf9454d7a5a88",
+        "status": "OPEN",
+        "amount": "10000000000000000",
+        "match_reason": "LOOKBACK_404_OK",
+        "payout": "0",
+        "refund": "0",
+        "funder": "0x20E850BAaD26d763d4f691780D1BEBA01c8D6084",
+        "recipient": "0x9CE8B4b8A355421f01779Ebd0c49e22A8F1FF0DD"
+      }
+    }
   },
-  "history": []
+  "history": [
+    {
+      "action": "fund_verified_recovery",
+      "caseName": "success",
+      "txHash": "0x86538668726638307a4897eb2fcb89ccd4d2ce642fc42abf10abab6ea8cf9726",
+      "escrowId": "0x5c751544da2e5d505dbdb118ca2fb94e53091bb28493c236889ae69fc78a909d",
+      "timestampUtc": "2026-10-20T07:27:35.665Z"
+    },
+    {
+      "action": "fund_verified",
+      "caseName": "mismatch",
+      "txHash": "0xa0acb2c81ef7e8aaae6d0f826f0ca6101904a337a1ef797d22855ade0d68ecf0",
+      "escrowId": "0xdb592d59e4dbc85926eac234ba3c92677ec2f42aeb4de1f1430cf9454d7a5a88",
+      "timestampUtc": "2026-10-20T09:21:13.367Z"
+    }
+  ]
 }

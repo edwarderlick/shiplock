@@ -229,7 +229,7 @@ npm --prefix web run build
 
 ### On-Chain Contract Deployment (Verified)
 - **Milestone v2 Contract Address**: [`0xF2110c3E6B170caF10FE953564285C6f01cB1F0c`](https://explorer-studio-dev.genlayer.com/address/0xF2110c3E6B170caF10FE953564285C6f01cB1F0c)
-- **Deployment Transaction Hash**: [`0x6874241737bf6b45f0e5f71211a5923bb02e6c8b715b15ed606a405d4a28182f`](https://explorer-studio-dev.genlayer.com/tx/0x6874241737bf6b45f0e5f71211a5923bb02e6c8b715b15ed606a405d4a28182f)
+- **Deployment Transaction Hash**: [`0x6874241737bf6b45f0e5f71211a5923bb02e6c8b715b15ed606a405d4a28182f`](https://explorer-studio-dev.genlayer.com/transactions/0x6874241737bf6b45f0e5f71211a5923bb02e6c8b715b15ed606a405d4a28182f)
 - **Receipt Status**: `FINALIZED` (Status Code 7)
 - **Execution Result**: `FINISHED_WITH_RETURN` (Execution Result Code 1)
 - **Consensus Round Outcome**: `MAJORITY_AGREE` (5/5 revealed validator votes)
@@ -243,12 +243,53 @@ npm --prefix web run build
   - **Deployment URL**: [https://shiplock-7xwj3qiap-edwarderlicks-projects.vercel.app](https://shiplock-7xwj3qiap-edwarderlicks-projects.vercel.app)
   - **Deployment ID**: `dpl_CV5iGz1n2hYAbTKqJHDvDvNdTJcu`
 
-### Pending Milestone v2 Operational Evidence (Phase C)
-The following live operational steps require subsequent milestone phases and are clearly marked **PENDING**:
+### Live Escrow Funding & Evidence (Phase C2/C3 Verified Live State)
+Two live `SOURCE_LINKED` escrows have been funded and verified on GenLayer Studio Next (`61997`) under contract `0xF2110c3E6B170caF10FE953564285C6f01cB1F0c`:
 
-- **Final Commit SHA**: `[PENDING: orchestrator commit]`
-- **GitHub Compare URL**: `[PENDING: https://github.com/edwarderlick/shiplock/compare/0617a80...<final-sha>]`
-- **Live Verified Escrow ID**: `[PENDING: fund_verified_escrow on Studio Next (Phase C)]`
-- **Successful Release Transaction Hash**: `[PENDING: in-window verified release tx hash (Phase C)]`
-- **Child Transfer Transaction Hash**: `[PENDING: emitted child transfer tx hash (Phase C)]`
-- **Negative / Mismatch Proof Hash**: `[PENDING: negative mismatch settlement tx hash (Phase C)]`
+1. **SUCCESS Escrow (In-Window Verified Release Target)**:
+   - **Case Name**: `success`
+   - **Policy**: `SOURCE_LINKED`
+   - **Escrow ID**: `0x5c751544da2e5d505dbdb118ca2fb94e53091bb28493c236889ae69fc78a909d`
+   - **Funding Transaction**: [`0x86538668726638307a4897eb2fcb89ccd4d2ce642fc42abf10abab6ea8cf9726`](https://explorer-studio-dev.genlayer.com/transactions/0x86538668726638307a4897eb2fcb89ccd4d2ce642fc42abf10abab6ea8cf9726)
+   - **Funding Status**: `FINALIZED` / `FINISHED_WITH_RETURN`
+   - **On-Chain State**: `OPEN` (`LOOKBACK_404_OK`, `10000000000000000` wei / 0.01 GEN locked)
+   - **Template & Package**: `NPM_VERSION` / `shiplock-v2-evidence-f2110c3e` @ `1.0.0`
+   - **Expected Repo & Tag**: `edwarderlick/shiplock` / `shiplock-evidence-v2-success-f2110c3e`
+   - **Publication Window**: `2026-10-21T06:58:31Z` to `2026-10-23T06:58:31Z`
+   - **Nonce**: `1001`
+   - **Recovery Provenance**: Captured via authoritative `EXCLUSIVE_STATE_RECOVERY` audit (`2026-10-20T07:27:35.665Z`) with all 10 exclusive state assertions verified (single escrow on-chain, 0.01 GEN open economics, pre-state zero economics, immutable identity match, mismatch unfunded at recovery time, external coordinates absent).
+
+2. **MISMATCH Escrow (Post-Window Conclusive Refund Target)**:
+   - **Case Name**: `mismatch`
+   - **Policy**: `SOURCE_LINKED`
+   - **Escrow ID**: `0xdb592d59e4dbc85926eac234ba3c92677ec2f42aeb4de1f1430cf9454d7a5a88`
+   - **Funding Transaction**: [`0xa0acb2c81ef7e8aaae6d0f826f0ca6101904a337a1ef797d22855ade0d68ecf0`](https://explorer-studio-dev.genlayer.com/transactions/0xa0acb2c81ef7e8aaae6d0f826f0ca6101904a337a1ef797d22855ade0d68ecf0)
+   - **Funding Status**: `FINALIZED` / `FINISHED_WITH_RETURN`
+   - **On-Chain State**: `OPEN` (`LOOKBACK_404_OK`, `10000000000000000` wei / 0.01 GEN locked)
+   - **Template & Package**: `NPM_VERSION` / `shiplock-v2-no-release-f2110c3e` @ `1.0.0`
+   - **Expected Repo & Tag**: `edwarderlick/shiplock` / `shiplock-evidence-v2-missing-f2110c3e`
+   - **Publication Window**: `2026-10-21T11:20:26Z` to `2026-10-23T11:20:26Z`
+   - **Nonce**: `1002`
+   - **Immediate Capture Provenance**: Verified immediately post-funding (`2026-10-20T09:21:13.367Z`) with pre-economics snapshot `escrowed_open = 10000000000000000` wei and post-economics snapshot `escrowed_open = 20000000000000000` wei.
+
+3. **Common Publication Interval & Current Economics**:
+   - **Common Publication Interval**:
+     - UTC: `2026-10-21T11:20:26Z` through `2026-10-23T06:58:31Z`
+     - IST: `2026-10-21 16:50:26` through `2026-10-23 12:28:31`
+     - Overlap Duration: 43 hours, 38 minutes, 5 seconds.
+   - **Two-Escrow Aggregate Economics (`get_economics()`)**:
+     - `escrowed_open`: `20000000000000000` wei (`0.02 GEN`)
+     - `paid_to_recipients`: `0 wei`
+     - `refunded_to_funders`: `0 wei`
+     - `outstanding_credits`: `0 wei`
+     - `treasury`: `0 wei`
+
+### Publication & Settlement Invariants (Phase C4 Status: PENDING)
+- **Zero Publication Invariant (Phase C4A)**: Both npm packages (`shiplock-v2-evidence-f2110c3e@1.0.0`, `shiplock-v2-no-release-f2110c3e@1.0.0`) and the SUCCESS GitHub release tag (`shiplock-evidence-v2-success-f2110c3e`) are verified strictly unpublished (HTTP 404 confirmed).
+- **Prohibited Tag Invariant**: The MISMATCH release tag `shiplock-evidence-v2-missing-f2110c3e` must **NEVER** be created on GitHub or in git, ensuring the controlled missing-release condition holds for post-window refund.
+- **Pending Phase C4 Operations**:
+  - Publication to npm and GitHub release tag creation will occur strictly within the common publication window (`2026-10-21T11:20:26Z` to `2026-10-23T06:58:31Z`).
+  - In-window verified release settlement (`release` call) remains **PENDING**.
+  - Post-window refund settlement (`release` call after `2026-10-23T11:20:26Z`) remains **PENDING**.
+  - Child transfer transaction verifications remain **PENDING**.
+  - Zero premature settlement or release success is claimed.
