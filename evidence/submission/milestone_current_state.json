@@ -1,0 +1,135 @@
+{
+  "verification_timestamp_utc": "2026-10-20T11:46:50.210Z",
+  "repository": {
+    "url": "https://github.com/edwarderlick/shiplock",
+    "branch": "main",
+    "verified_commit_sha": "3495ebfcc4dc40be40444838657cc52f3a6c447a",
+    "implementation_and_evidence_commit_sha": "3495ebfcc4dc40be40444838657cc52f3a6c447a",
+    "accepted_baseline_sha": "0617a800a0cabde7d1e324df110bfd3c8b7ac138",
+    "compare_url": "https://github.com/edwarderlick/shiplock/compare/0617a80...3495ebf"
+  },
+  "deployment": {
+    "network": "GenLayer Studio Next (studio-dev)",
+    "chain_id": 61997,
+    "rpc_endpoint": "https://studio-dev.genlayer.com/api",
+    "contract_address": "0xF2110c3E6B170caF10FE953564285C6f01cB1F0c",
+    "deployment_tx_hash": "0x6874241737bf6b45f0e5f71211a5923bb02e6c8b715b15ed606a405d4a28182f",
+    "deployer_address": "0x20E850BAaD26d763d4f691780D1BEBA01c8D6084",
+    "production_web_url": "https://shiplock-chi.vercel.app"
+  },
+  "source_parity": {
+    "contract_file": "contracts/shiplock.py",
+    "local_sha256": "860387dc9579aba8d445df9395c4ec80bc425b7b8a3d7b27eed8cc477b59276d",
+    "local_byte_count": 51327,
+    "on_chain_sha256": "860387dc9579aba8d445df9395c4ec80bc425b7b8a3d7b27eed8cc477b59276d",
+    "on_chain_byte_count": 51327,
+    "exact_utf8_byte_match": true
+  },
+  "verification_gates": {
+    "python_contract_and_keystore_tests": {
+      "command": "python -m pytest",
+      "passed": 57,
+      "failed": 0,
+      "suites": 2
+    },
+    "historical_evidence_harness_tests": {
+      "command": "node --test tests/test_evidence_harness.mjs",
+      "passed": 60,
+      "failed": 0,
+      "suites": 11
+    },
+    "v2_live_evidence_tests": {
+      "command": "node --test tests/test_v2_live_evidence.mjs",
+      "passed": 59,
+      "failed": 0,
+      "suites": 1
+    },
+    "web_tests": {
+      "command": "npm --prefix web test",
+      "passed": 74,
+      "failed": 0,
+      "suites": 16
+    },
+    "web_lint": {
+      "command": "npm --prefix web run lint",
+      "errors": 0,
+      "warnings": 18
+    },
+    "typescript_check": {
+      "command": "npx --prefix web tsc -p web/tsconfig.json --noEmit",
+      "errors": 0
+    },
+    "production_build": {
+      "command": "npm --prefix web run build",
+      "status": "success",
+      "prerendered_pages": 11
+    },
+    "git_diff_check": {
+      "command": "git diff --check",
+      "status": "clean",
+      "errors": 0
+    }
+  },
+  "live_evidence_escrows": {
+    "success": {
+      "escrow_id": "0x5c751544da2e5d505dbdb118ca2fb94e53091bb28493c236889ae69fc78a909d",
+      "funding_tx_hash": "0x86538668726638307a4897eb2fcb89ccd4d2ce642fc42abf10abab6ea8cf9726",
+      "status": "OPEN",
+      "match_reason": "LOOKBACK_404_OK",
+      "amount_wei": "10000000000000000",
+      "amount_gen": "0.01",
+      "policy": "SOURCE_LINKED",
+      "template": "NPM_VERSION",
+      "package_name": "shiplock-v2-evidence-f2110c3e",
+      "package_version": "1.0.0",
+      "expected_repo": "edwarderlick/shiplock",
+      "expected_tag": "shiplock-evidence-v2-success-f2110c3e",
+      "window_start_utc": "2026-10-21T06:58:31Z",
+      "window_end_utc": "2026-10-23T06:58:31Z",
+      "funding_provenance": "EXCLUSIVE_STATE_RECOVERY"
+    },
+    "mismatch": {
+      "escrow_id": "0xdb592d59e4dbc85926eac234ba3c92677ec2f42aeb4de1f1430cf9454d7a5a88",
+      "funding_tx_hash": "0xa0acb2c81ef7e8aaae6d0f826f0ca6101904a337a1ef797d22855ade0d68ecf0",
+      "status": "OPEN",
+      "match_reason": "LOOKBACK_404_OK",
+      "amount_wei": "10000000000000000",
+      "amount_gen": "0.01",
+      "policy": "SOURCE_LINKED",
+      "template": "NPM_VERSION",
+      "package_name": "shiplock-v2-no-release-f2110c3e",
+      "package_version": "1.0.0",
+      "expected_repo": "edwarderlick/shiplock",
+      "expected_tag": "shiplock-evidence-v2-missing-f2110c3e",
+      "window_start_utc": "2026-10-21T11:20:26Z",
+      "window_end_utc": "2026-10-23T11:20:26Z",
+      "funding_provenance": "IMMEDIATE_POST_FUNDING_AUDIT"
+    }
+  },
+  "current_contract_economics": {
+    "escrowed_open_wei": "20000000000000000",
+    "escrowed_open_gen": "0.02",
+    "paid_to_recipients_wei": "0",
+    "refunded_to_funders_wei": "0",
+    "outstanding_credits_wei": "0",
+    "treasury_wei": "0"
+  },
+  "public_evidence_urls": {
+    "repository": "https://github.com/edwarderlick/shiplock",
+    "commit": "https://github.com/edwarderlick/shiplock/commit/3495ebfcc4dc40be40444838657cc52f3a6c447a",
+    "compare": "https://github.com/edwarderlick/shiplock/compare/0617a80...3495ebf",
+    "production_app": "https://shiplock-chi.vercel.app",
+    "contract_explorer": "https://explorer-studio-dev.genlayer.com/address/0xF2110c3E6B170caF10FE953564285C6f01cB1F0c",
+    "deployment_tx_explorer": "https://explorer-studio-dev.genlayer.com/transactions/0x6874241737bf6b45f0e5f71211a5923bb02e6c8b715b15ed606a405d4a28182f",
+    "success_funding_tx_explorer": "https://explorer-studio-dev.genlayer.com/transactions/0x86538668726638307a4897eb2fcb89ccd4d2ce642fc42abf10abab6ea8cf9726",
+    "mismatch_funding_tx_explorer": "https://explorer-studio-dev.genlayer.com/transactions/0xa0acb2c81ef7e8aaae6d0f826f0ca6101904a337a1ef797d22855ade0d68ecf0",
+    "milestone_submission_doc": "https://github.com/edwarderlick/shiplock/blob/main/MILESTONE_SUBMISSION.md",
+    "milestone_snapshot_json": "https://github.com/edwarderlick/shiplock/blob/main/evidence/submission/milestone_current_state.json"
+  },
+  "lifecycle_claims_disclosure": {
+    "settlement_complete": false,
+    "payout_claimed": false,
+    "refund_claimed": false,
+    "portal_submitted": false
+  }
+}
