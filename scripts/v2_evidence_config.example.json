@@ -1,0 +1,43 @@
+{
+  "contractAddress": "0xF2110c3E6B170caF10FE953564285C6f01cB1F0c",
+  "chainId": 61997,
+  "rpcUrl": "https://studio-dev.genlayer.com/api",
+  "funderAddress": "0x20E850BAaD26d763d4f691780D1BEBA01c8D6084",
+  "recipientAddress": "0x0f907a2598AEF71B988f9208103066586A1a4aF0",
+  "submitterAccount": "account:coverlock-submitter",
+  "keychainService": "genlayer-cli",
+  "deployerAccount": "account:shiplock-deployer-live",
+  "safety": {
+    "minSafetyReserveWei": "50000000000000000",
+    "principalPerEscrowWei": "10000000000000000",
+    "maxCumulativePrincipalWei": "20000000000000000"
+  },
+  "cases": {
+    "success": {
+      "name": "Source-Linked Verified Release (Success Case)",
+      "policy": "SOURCE_LINKED",
+      "template": "NPM_VERSION",
+      "package": "example-shiplock-verified-release",
+      "version": "1.0.0",
+      "expectedRepo": "example-org/shiplock-candidate",
+      "expectedTag": "v1.0.0",
+      "amountWei": "10000000000000000",
+      "windowLeadHours": 26,
+      "windowDurationHours": 48,
+      "nonce": "1001"
+    },
+    "mismatch": {
+      "name": "Source-Linked Mismatch Proof (Refund Case)",
+      "policy": "SOURCE_LINKED",
+      "template": "PYPI_VERSION",
+      "package": "example-shiplock-verified-mismatch",
+      "version": "0.1.0",
+      "expectedRepo": "example-org/shiplock-mismatch",
+      "expectedTag": "v0.1.0",
+      "amountWei": "10000000000000000",
+      "windowLeadHours": 26,
+      "windowDurationHours": 48,
+      "nonce": "1002"
+    }
+  }
+}

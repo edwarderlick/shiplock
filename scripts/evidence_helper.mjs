@@ -542,6 +542,69 @@ export function parseGithubReleaseMetadata(data, expectedRepo, expectedTag) {
 }
 
 /**
+ * Extracts repository from PyPI metadata matching contracts/shiplock.py:_extract_pypi_repo.
+ */
+export function extractPypiRepo(data) {
+  if (!data || typeof data !== "object") return "";
+  const info = data.info;
+  if (!info || typeof info !== "object") return "";
+  const projectUrls = info.project_urls;
+  if (projectUrls && typeof projectUrls === "object") {
+    const priorityKeys = ["source", "repository", "code", "github", "repo", "homepage", "home"];
+    for (const pkey of priorityKeys) {
+      for (const [k, u] of Object.entries(projectUrls)) {
+        if (String(k).toLowerCase().includes(pkey)) {
+          const norm = normalizeGithubRepoUrl(String(u || ""));
+          if (norm) return norm;
+        }
+      }
+    }
+    for (const [, u] of Object.entries(projectUrls)) {
+      const norm = normalizeGithubRepoUrl(String(u || ""));
+      if (norm) return norm;
+    }
+  }
+  for (const fallbackField of ["project_url", "home_page"]) {
+    const u = info[fallbackField];
+    if (u) {
+      const norm = normalizeGithubRepoUrl(String(u || ""));
+      if (norm) return norm;
+    }
+  }
+  return "";
+}
+
+/**
+ * Extracts repository from npm metadata matching contracts/shiplock.py:_extract_npm_repo.
+ */
+export function extractNpmRepo(data, verKey) {
+  if (!data || typeof data !== "object") return "";
+  const versionsMap = data.versions;
+  if (versionsMap && typeof versionsMap === "object" && verKey in versionsMap) {
+    const vObj = versionsMap[verKey];
+    if (vObj && typeof vObj === "object") {
+      const repoEntry = vObj.repository;
+      if (repoEntry && typeof repoEntry === "object") {
+        const norm = normalizeGithubRepoUrl(String(repoEntry.url || ""));
+        if (norm) return norm;
+      } else if (typeof repoEntry === "string") {
+        const norm = normalizeGithubRepoUrl(repoEntry);
+        if (norm) return norm;
+      }
+    }
+  }
+  const topRepo = data.repository;
+  if (topRepo && typeof topRepo === "object") {
+    const norm = normalizeGithubRepoUrl(String(topRepo.url || ""));
+    if (norm) return norm;
+  } else if (typeof topRepo === "string") {
+    const norm = normalizeGithubRepoUrl(topRepo);
+    if (norm) return norm;
+  }
+  return "";
+}
+
+/**
  * Queries official registry endpoints for PyPI and npm.
  */
 export async function queryRegistryMetadata(template, packageName, version) {
@@ -558,6 +621,7 @@ export async function queryRegistryMetadata(template, packageName, version) {
           publishTime: null,
           isYanked: false,
           kind: "404",
+          normalizedRepo: null,
           summary: "Package or version not found (HTTP 404)",
         };
       }
@@ -569,11 +633,13 @@ export async function queryRegistryMetadata(template, packageName, version) {
           publishTime: null,
           isYanked: false,
           kind: "http_error",
+          normalizedRepo: null,
           summary: `HTTP error ${statusCode}: ${res.statusText}`,
         };
       }
       const data = await res.json();
       const parsed = parsePypiVersionMetadata(data, packageName, version);
+      const normalizedRepo = extractPypiRepo(data);
       return {
         url,
         statusCode: 200,
@@ -581,11 +647,12 @@ export async function queryRegistryMetadata(template, packageName, version) {
         publishTime: parsed.publish_time || null,
         isYanked: parsed.yanked,
         kind: parsed.kind,
+        normalizedRepo: normalizedRepo || null,
         error: parsed.error || null,
         yankedReason: data.info?.yanked_reason || null,
         summary:
           parsed.kind === "200"
-            ? `Published on PyPI at ${parsed.publish_time} (yanked: ${parsed.yanked})`
+            ? `Published on PyPI at ${parsed.publish_time} (yanked: ${parsed.yanked}, repo: ${normalizedRepo || "none"})`
             : `PyPI response inconclusive: ${parsed.error || parsed.kind}`,
       };
     } catch (err) {
@@ -596,6 +663,7 @@ export async function queryRegistryMetadata(template, packageName, version) {
         publishTime: null,
         isYanked: false,
         kind: "network_error",
+        normalizedRepo: null,
         summary: `Network fetch failed: ${err.message}`,
       };
     }
@@ -616,6 +684,7 @@ export async function queryRegistryMetadata(template, packageName, version) {
           publishTime: null,
           isYanked: false,
           kind: "404",
+          normalizedRepo: null,
           summary: "Package not found on npm (HTTP 404)",
         };
       }
@@ -627,11 +696,13 @@ export async function queryRegistryMetadata(template, packageName, version) {
           publishTime: null,
           isYanked: false,
           kind: "http_error",
+          normalizedRepo: null,
           summary: `HTTP error ${statusCode}: ${res.statusText}`,
         };
       }
       const data = await res.json();
       const parsed = parseNpmMetadata(data, packageName, version);
+      const normalizedRepo = extractNpmRepo(data, version);
       if (parsed.kind === "404") {
         return {
           url,
@@ -640,6 +711,7 @@ export async function queryRegistryMetadata(template, packageName, version) {
           publishTime: null,
           isYanked: false,
           kind: "404",
+          normalizedRepo: null,
           summary: `Version ${version} not published on npm`,
         };
       }
@@ -650,10 +722,11 @@ export async function queryRegistryMetadata(template, packageName, version) {
         publishTime: parsed.publish_time || null,
         isYanked: parsed.yanked,
         kind: parsed.kind,
+        normalizedRepo: normalizedRepo || null,
         error: parsed.error || null,
         summary:
           parsed.kind === "200"
-            ? `Published on npm at ${parsed.publish_time} (yanked: ${parsed.yanked})`
+            ? `Published on npm at ${parsed.publish_time} (yanked: ${parsed.yanked}, repo: ${normalizedRepo || "none"})`
             : `npm response inconclusive: ${parsed.error || parsed.kind}`,
       };
     } catch (err) {
@@ -664,6 +737,7 @@ export async function queryRegistryMetadata(template, packageName, version) {
         publishTime: null,
         isYanked: false,
         kind: "network_error",
+        normalizedRepo: null,
         summary: `Network fetch failed: ${err.message}`,
       };
     }
@@ -1803,8 +1877,9 @@ export function validateTransferAllocations({
         throw new Error(`Message allocation at index ${i} has invalid recipient: ${alloc?.recipient}`);
       }
       recipientsInAllocations.add(alloc.recipient.trim().toLowerCase());
-      if (BigInt(alloc.budget ?? 0) <= 0n) {
-        throw new Error(`Message allocation at index ${i} has non-positive budget: ${alloc?.budget}`);
+      const budgetVal = alloc.budget !== undefined ? alloc.budget : alloc.amount;
+      if (budgetVal === undefined || BigInt(budgetVal) <= 0n) {
+        throw new Error(`Message allocation at index ${i} has non-positive budget: ${budgetVal}`);
       }
 
       const parentIdx =
@@ -1812,7 +1887,7 @@ export function validateTransferAllocations({
           ? BigInt(alloc.parentIndex)
           : MESSAGE_ALLOCATION_ROOT_PARENT_INDEX;
       if (parentIdx === MESSAGE_ALLOCATION_ROOT_PARENT_INDEX) {
-        sumBudgets += BigInt(alloc.budget);
+        sumBudgets += BigInt(budgetVal);
       }
     }
 

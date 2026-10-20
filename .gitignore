@@ -28,3 +28,5 @@ keystore.json
 .deployer_keystore.json
 
 .vercel
+scripts/v2_evidence_config.local.json
+scripts/*.local.json

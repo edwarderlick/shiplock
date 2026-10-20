@@ -1,0 +1,12 @@
+{
+  "contractAddress": "0xF2110c3E6B170caF10FE953564285C6f01cB1F0c",
+  "chainId": 61997,
+  "rpcUrl": "https://studio-dev.genlayer.com/api",
+  "policy": "SOURCE_LINKED",
+  "initializedAtUtc": "2026-10-19T17:39:00.000Z",
+  "cases": {
+    "success": null,
+    "mismatch": null
+  },
+  "history": []
+}
